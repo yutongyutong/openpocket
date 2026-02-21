@@ -2,120 +2,132 @@
 layout: home
 
 title: OpenPocket
-titleTemplate: OpenPocket Documentation
-
-hero:
-  name: '<img class="op-hero-logo" src="/openpocket-logo.png" alt="OpenPocket logo" />'
-  text: An Intelligent Phone That Never Sleeps.
-  tagline: OpenPocket runs an always-on agent phone locally, with privacy first.
-  image:
-    src: /openpocket-grid.svg
-    alt: OpenPocket local emulator architecture
-  actions:
-    - theme: brand
-      text: Start Setup
-      link: /get-started/
-    - theme: alt
-      text: Read Docs
-      link: /hubs
-
-features:
-  - title: Local Runtime
-    details: Execute tasks on a local Android emulator.
-  - title: Human + Agent
-    details: Direct control and agent automation in one workflow.
-  - title: Auditable
-    details: Sessions, memory, and artifacts stay visible and local.
+titleTemplate: OpenPocket — An Intelligent Phone That Never Sleeps
 ---
 
 <script setup>
 import { withBase } from "vitepress";
 </script>
 
-<section class="op-home-section op-centered">
-  <h2>OpenPocket in One Line</h2>
-  <p>
-    OpenPocket helps users automate real mobile app tasks without sending execution control to a cloud phone runtime.
-  </p>
-  <div class="op-pill-row">
-    <span class="op-pill">Shopping</span>
-    <span class="op-pill">Entertainment</span>
-    <span class="op-pill">Social Workflows</span>
+<div class="op-landing">
+
+<!-- Hero -->
+<section class="op-hero">
+  <div class="op-hero-left">
+    <div class="op-hero-title-block">
+      <h1 class="op-hero-title">
+        <span class="regular">An</span> <span class="regular">Intelligent</span> <span class="orange">Phone</span><br/>
+        <span class="regular">That Never Sleeps</span>
+      </h1>
+      <p class="op-hero-desc">
+        OpenPocket runs an always-on agent phone locally, with privacy first.
+      </p>
+    </div>
+    <div class="op-hero-npm">
+      <p class="op-hero-npm-label">Install with NPM</p>
+      <code class="op-hero-npm-code">npm install -g openpocket</code>
+    </div>
+    <div class="op-hero-actions">
+      <a class="op-btn op-btn-brand" :href="withBase('/get-started/')">
+        Start Setup
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.33" stroke-linecap="round" stroke-linejoin="round"><path d="M3.333 8h9.334"/><path d="M8 3.333 12.667 8 8 12.667"/></svg>
+      </a>
+      <a class="op-btn op-btn-alt" :href="withBase('/hubs')">Read Docs</a>
+    </div>
+  </div>
+  <div class="op-hero-right">
+    <video autoplay loop muted playsinline :src="withBase('/openpocket.mp4')"></video>
   </div>
 </section>
 
-<section class="op-home-section op-centered">
-  <h2>How It Moves</h2>
-  <div class="op-grid op-grid-compact">
-    <article class="op-card">
-      <h3>1. Ask</h3>
-      <p>Start from CLI, bot, or local panel.</p>
-    </article>
-    <article class="op-card">
-      <h3>2. Plan</h3>
+<!-- Why OpenPocket? -->
+<section class="op-why">
+  <p class="op-section-label">Why OpenPocket?</p>
+  <div class="op-why-grid">
+    <div class="op-why-item">
+      <h3>Local Runtime</h3>
+      <p>Execute mobile workflows on your own machine. No expensive cloud subscriptions, no data leaks.</p>
+    </div>
+    <div class="op-why-item">
+      <h3>Human + Agent</h3>
+      <p>The perfect hybrid. Manual control when you want it, agent automation when you don't.</p>
+    </div>
+    <div class="op-why-item">
+      <h3>Auditable &amp; Private</h3>
+      <p>All sessions and memory stay visible and local. Your data, your rules.</p>
+    </div>
+  </div>
+  <p class="op-section-desc"><img class="op-desc-logo" :src="withBase('/openpocket-logo.png')" alt="" /><span class="op-desc-brand">OpenPocket</span> helps users automate real mobile app tasks, <span class="op-underline-dotted">without</span> sending execution control to a cloud phone runtime.</p>
+</section>
+
+<!-- Use Cases -->
+<section class="op-usecases">
+  <p class="op-section-label">Use Cases</p>
+  <div class="op-usecases-scroll-wrap">
+    <div class="op-usecases-track">
+      <div class="op-usecase-card"><img class="op-usecase-icon" :src="withBase('/usecase-shopping.png')" alt="Shopping" /><span>Shopping</span></div>
+      <div class="op-usecase-card"><img class="op-usecase-icon" :src="withBase('/usecase-social.png')" alt="Social Workflows" /><span>Social Workflows</span></div>
+      <div class="op-usecase-card"><img class="op-usecase-icon" :src="withBase('/usecase-entertainment.png')" alt="Entertainment" /><span>Entertainment</span></div>
+      <div class="op-usecase-card"><img class="op-usecase-icon" :src="withBase('/usecase-andmore.png')" alt="And More" /><span>And More</span></div>
+      <div class="op-usecase-card"><img class="op-usecase-icon" :src="withBase('/usecase-shopping.png')" alt="Shopping" /><span>Shopping</span></div>
+      <div class="op-usecase-card"><img class="op-usecase-icon" :src="withBase('/usecase-social.png')" alt="Social Workflows" /><span>Social Workflows</span></div>
+      <div class="op-usecase-card"><img class="op-usecase-icon" :src="withBase('/usecase-entertainment.png')" alt="Entertainment" /><span>Entertainment</span></div>
+      <div class="op-usecase-card"><img class="op-usecase-icon" :src="withBase('/usecase-andmore.png')" alt="And More" /><span>And More</span></div>
+      <div class="op-usecase-card"><img class="op-usecase-icon" :src="withBase('/usecase-shopping.png')" alt="Shopping" /><span>Shopping</span></div>
+      <div class="op-usecase-card"><img class="op-usecase-icon" :src="withBase('/usecase-social.png')" alt="Social Workflows" /><span>Social Workflows</span></div>
+      <div class="op-usecase-card"><img class="op-usecase-icon" :src="withBase('/usecase-entertainment.png')" alt="Entertainment" /><span>Entertainment</span></div>
+      <div class="op-usecase-card"><img class="op-usecase-icon" :src="withBase('/usecase-andmore.png')" alt="And More" /><span>And More</span></div>
+    </div>
+    <div class="op-usecases-fade-l"></div>
+    <div class="op-usecases-fade-r"></div>
+  </div>
+</section>
+
+<!-- Simple Workflow -->
+<section class="op-workflow">
+  <p class="op-section-label">Simple Workflow, Powerful Results</p>
+  <div class="op-workflow-grid">
+    <div class="op-workflow-step">
+      <div class="op-workflow-step-header">
+        <p class="op-workflow-step-num">1</p>
+        <h3 class="op-workflow-step-title">Ask</h3>
+      </div>
+      <p>Initiate via CLI, local panel, or custom bot.</p>
+    </div>
+    <div class="op-workflow-step">
+      <div class="op-workflow-step-header">
+        <p class="op-workflow-step-num">2</p>
+        <h3 class="op-workflow-step-title">Plan</h3>
+      </div>
       <p>Agent chooses the next mobile action.</p>
-    </article>
-    <article class="op-card">
-      <h3>3. Act</h3>
+    </div>
+    <div class="op-workflow-step">
+      <div class="op-workflow-step-header">
+        <p class="op-workflow-step-num">3</p>
+        <h3 class="op-workflow-step-title">Act</h3>
+      </div>
       <p>OpenPocket executes on your local emulator.</p>
-    </article>
-  </div>
-
-  <div class="op-architecture">
-
-```mermaid
-flowchart LR
-  U["User"] --> R["OpenPocket Runtime"]
-  R --> A["Agent"]
-  A --> D["ADB Runtime"]
-  D --> E["Android Emulator (Local)"]
-  A --> P["Local Artifacts"]
-```
-
+    </div>
   </div>
 </section>
 
-<section class="op-home-section op-doc-map-section op-centered">
-  <div class="op-doc-map-head">
-    <p class="op-doc-map-kicker">Documentation</p>
-    <h2>Documentation Map</h2>
-    <p>Pick one entry and dive deeper.</p>
-  </div>
-  <div class="op-doc-grid">
-    <a class="op-doc-link" :href="withBase('/get-started/')">
-      <span class="op-doc-chip">Start</span>
-      <strong>Get Started</strong>
-      <span class="op-doc-copy">Install and run OpenPocket quickly.</span>
-    </a>
-    <a class="op-doc-link" :href="withBase('/concepts/project-blueprint')">
-      <span class="op-doc-chip">Vision</span>
-      <strong>Project Blueprint</strong>
-      <span class="op-doc-copy">Product direction and user scenarios.</span>
-    </a>
-    <a class="op-doc-link" :href="withBase('/concepts/')">
-      <span class="op-doc-chip">System</span>
-      <strong>Concepts</strong>
-      <span class="op-doc-copy">Architecture and core runtime model.</span>
-    </a>
-    <a class="op-doc-link" :href="withBase('/tools/')">
-      <span class="op-doc-chip">Build</span>
-      <strong>Tools</strong>
-      <span class="op-doc-copy">Skills and scripts for automation.</span>
-    </a>
-    <a class="op-doc-link" :href="withBase('/reference/')">
-      <span class="op-doc-chip">Specs</span>
-      <strong>Reference</strong>
-      <span class="op-doc-copy">Defaults, schemas, and commands.</span>
-    </a>
-    <a class="op-doc-link" :href="withBase('/ops/')">
-      <span class="op-doc-chip">Operate</span>
-      <strong>Ops</strong>
-      <span class="op-doc-copy">Runbook and troubleshooting guidance.</span>
-    </a>
-    <a class="op-doc-link" :href="withBase('/hubs')">
-      <span class="op-doc-chip">Overview</span>
-      <strong>Doc Hubs</strong>
-      <span class="op-doc-copy">Browse the full documentation structure.</span>
-    </a>
+<!-- Architecture -->
+<section class="op-arch">
+  <p class="op-section-label">Architecture</p>
+  <div class="op-arch-flow">
+    <div class="op-arch-node op-arch-node--gray op-arch-group">User</div>
+    <span class="op-arch-arrow op-arch-group">→</span>
+    <div class="op-arch-node op-arch-node--blue op-arch-group">OpenPocket Runtime</div>
+    <span class="op-arch-arrow op-arch-group">→</span>
+    <div class="op-arch-node op-arch-node--orange op-arch-group">Agent</div>
+    <span class="op-arch-arrow op-arch-group">→</span>
+    <div class="op-arch-stack op-arch-group">
+      <div class="op-arch-node op-arch-node--blue">ADB Runtime</div>
+      <div class="op-arch-node op-arch-node--blue">Local Artifacts</div>
+    </div>
+    <span class="op-arch-arrow op-arch-group">→</span>
+    <div class="op-arch-node op-arch-node--gray op-arch-group">Android Emulator</div>
   </div>
 </section>
+
+</div>

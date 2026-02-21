@@ -226,6 +226,7 @@ export default withMermaid(defineConfig({
   ],
   themeConfig: {
     siteTitle: "OpenPocket",
+    logo: "/openpocket-logo.png",
     nav: [
       { text: "Home", link: "/" },
       { text: "Blueprint", link: "/concepts/project-blueprint" },

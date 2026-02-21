@@ -33,7 +33,7 @@ Status snapshot (February 2026):
 
 - A stronger long-horizon memory system.
 - Phone-use-specific prompt engineering and evaluation.
-- Cross-platform runtime/panel support beyond macOS-first workflows.
+- Cross-platform runtime/web-dashboard support beyond macOS-first workflows.
 
 ## Quick Start
 
@@ -278,11 +278,28 @@ Example config template:
 
 - [`openpocket.config.example.json`](./openpocket.config.example.json)
 
+### Supported Model Providers
+
+OpenPocket supports multiple AI model providers through OpenAI-compatible APIs:
+
+**OpenAI** - Direct access to GPT models (gpt-5.2-codex, gpt-5.3-codex)
+
+**OpenRouter** - Multi-provider routing for Claude models (claude-sonnet-4.6, claude-opus-4.6)
+
+**BlockRun** - Pay-per-request micropayments with no subscriptions
+- Ideal for always-on agents with cost-effective pricing
+- Access to 30+ models: GPT-4o, Claude Sonnet 4, Gemini 2.0 Flash, DeepSeek
+- Model IDs: `blockrun/gpt-4o`, `blockrun/claude-sonnet-4`, `blockrun/gemini-2.0-flash`, `blockrun/deepseek-chat`
+- Get started at [docs.blockrun.ai](https://docs.blockrun.ai)
+
+**AutoGLM** - Phone-optimized multilingual model (autoglm-phone)
+
 Common environment variables:
 
 ```bash
 export OPENAI_API_KEY="<your_openai_key>"
 export OPENROUTER_API_KEY="<your_openrouter_key>"
+export BLOCKRUN_API_KEY="<your_blockrun_key>"
 export AUTOGLM_API_KEY="<your_autoglm_key>"
 export TELEGRAM_BOT_TOKEN="<your_telegram_bot_token>"
 export OPENPOCKET_HUMAN_AUTH_KEY="<your_human_auth_relay_key>"
@@ -308,21 +325,54 @@ Command prefix by install mode:
 ./openpocket agent --model gpt-5.2-codex "Open Chrome and search weather"
 ./openpocket script run --text "echo hello"
 ./openpocket telegram setup
+./openpocket telegram whoami
 ./openpocket skills list
 ./openpocket gateway start
+./openpocket dashboard start
+./openpocket test permission-app deploy
+./openpocket test permission-app task
 ./openpocket human-auth-relay start
-./openpocket panel start
 ```
 
 `human-auth-relay start` is mainly a standalone debug mode. In normal gateway usage, local relay/tunnel startup is handled automatically from config.
 
+`gateway start` now auto-starts the local Web dashboard (default `http://127.0.0.1:51888`, configurable in `config.dashboard`).  
+Use `dashboard start` when you want to run only the dashboard process.
+
 Legacy aliases still work (deprecated): `openpocket init`, `openpocket setup`.
 
-`openpocket panel start` on macOS uses this order:
+The legacy native macOS panel has been removed from the repository.
+Use `openpocket dashboard start` (or `openpocket gateway start`, which auto-starts dashboard).
 
-1. Open an already-installed panel app from `/Applications` or `~/Applications`.
-2. If running from a source clone with `apps/openpocket-menubar`, build and launch from source.
-3. If neither is available (typical npm install), open GitHub Releases and guide PKG installation.
+## Web Dashboard
+
+The local Web dashboard is now the primary control surface.
+
+### Startup behavior
+
+1. `openpocket gateway start` auto-starts dashboard and prints dashboard URL.
+2. `openpocket dashboard start` starts dashboard only (no Telegram gateway).
+
+Default dashboard config:
+
+```json
+"dashboard": {
+  "enabled": true,
+  "host": "127.0.0.1",
+  "port": 51888,
+  "autoOpenBrowser": false
+}
+```
+
+### Runtime page layout
+
+- Left column: Gateway status, emulator controls, and core path config.
+- Right column: large emulator preview pane for tap/text control.
+
+### Auto refresh behavior
+
+- Preview auto-refresh updates image/metadata silently.
+- It does not spam status text with repeated "Refreshing emulator preview..." messages.
 
 ## Human Authorization Modes
 
@@ -338,6 +388,58 @@ When the agent emits `request_human_auth`, Telegram users can:
 - or run fallback commands:
   - `/auth approve <request-id> [note]`
   - `/auth reject <request-id> [note]`
+
+To inspect current chat allow policy and discover recent chat IDs for your bot:
+
+```bash
+openpocket telegram whoami
+```
+
+When a running task enters Android system permission UI
+(`permissioncontroller` / `packageinstaller`), OpenPocket now auto-triggers
+`request_human_auth` and sends the Telegram approval link flow.
+
+## PermissionLab E2E Test
+
+Use the built-in Android test app to verify remote authorization flow end-to-end.
+
+### 1) Start gateway + ngrok human-auth mode
+
+```bash
+openpocket gateway start
+```
+
+### 2) Build/install/launch test app on emulator
+
+```bash
+openpocket test permission-app deploy
+```
+
+Optional commands:
+
+```bash
+openpocket test permission-app launch
+openpocket test permission-app reset
+openpocket test permission-app uninstall
+openpocket test permission-app task
+openpocket test permission-app task --send --chat <your_chat_id>
+```
+
+### 3) Send task in Telegram
+
+Use the generated prompt from `openpocket test permission-app task`, or send this directly:
+
+```text
+/run Open app OpenPocket PermissionLab. Tap one permission button (Camera, SMS, Location, Contacts, etc.). If a system permission/auth wall appears, do not bypass in emulator. Call request_human_auth and wait for my approval from Telegram link. After I approve/reject on phone, continue and report result.
+```
+
+### 4) Approve from phone
+
+When Telegram receives the human-auth message:
+
+1. Open the URL button (ngrok public link).
+2. Approve/reject on the web page.
+3. Agent resumes and reports task result in Telegram.
 
 ## Documentation
 
@@ -392,10 +494,9 @@ npm run docs:preview
 
 ## Repository Structure
 
-- [`/src`](./src): runtime source code (agent, gateway, device, tools, onboarding)
+- [`/src`](./src): runtime source code (agent, gateway, device, tools, onboarding, dashboard)
 - [`/frontend`](./frontend): standalone frontend site (homepage + docs)
 - [`/test`](./test): runtime contract and integration tests
-- [`/apps/openpocket-menubar`](./apps/openpocket-menubar): native macOS menu bar control panel
 - [`/dist`](./dist): build output
 
 ## Development

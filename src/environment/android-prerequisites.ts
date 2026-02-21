@@ -464,15 +464,13 @@ function detectHostArm64(): boolean {
   return false;
 }
 
-function systemImageCandidates(): string[] {
+export function getSystemImageCandidates(): string[] {
   const archTag = detectHostArm64() ? "arm64-v8a" : "x86_64";
   return Array.from(
     new Set([
       `system-images;android-34;google_apis_playstore;${archTag}`,
       "system-images;android-34;google_apis_playstore;x86_64",
       "system-images;android-34;google_apis_playstore;arm64-v8a",
-      "system-images;android-34;google_apis;x86_64",
-      "system-images;android-34;google_apis;arm64-v8a",
     ]),
   );
 }
@@ -482,7 +480,7 @@ function findExistingSystemImage(sdkRoot: string, logger: (line: string) => void
   // Also scan the well-known Android Studio SDK location in case sdkRoot differs.
   const androidStudioSdk = path.join(os.homedir(), "Library", "Android", "sdk");
   const sdkRootsToCheck = Array.from(new Set([sdkRoot, androidStudioSdk].filter((p) => fs.existsSync(p))));
-  const candidates = systemImageCandidates();
+  const candidates = getSystemImageCandidates();
 
   for (const pkg of candidates) {
     // Package name format: system-images;android-XX;variant;arch
@@ -515,7 +513,7 @@ function installOneSystemImage(
     return existing;
   }
 
-  const candidates = systemImageCandidates();
+  const candidates = getSystemImageCandidates();
   for (const pkg of candidates) {
     logger(`Trying system image: ${pkg}`);
     const res = run(sdkmanager, [`--sdk_root=${sdkRoot}`, pkg], { inherit: true, env: toolEnv });
@@ -525,7 +523,9 @@ function installOneSystemImage(
     }
   }
 
-  logger("Could not install a system image automatically.");
+  logger(
+    "Could not install Google Play system image automatically (strict mode: no fallback to non-PlayStore images).",
+  );
   return null;
 }
 
@@ -775,7 +775,9 @@ export async function ensureAndroidPrerequisites(
       installedSteps.push(`avd:${config.emulator.avdName}`);
       currentAvds = listAvdNames(avdmanager, toolEnv);
     } else {
-      throw new Error("No AVD exists and no installable system image was found.");
+      throw new Error(
+        "No AVD exists and no installable Google Play system image was found (strict mode: fallback disabled).",
+      );
     }
   }
 

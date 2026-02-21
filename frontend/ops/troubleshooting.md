@@ -34,6 +34,27 @@
 - check allowed chat IDs (`telegram.allowedChatIds`)
 - ensure gateway process is running
 
+## Human-auth link is missing in Telegram
+
+- ensure `humanAuth.enabled=true`
+- ensure gateway started with `humanAuth.useLocalRelay=true`
+- check gateway logs for local relay startup failure
+- use `/auth pending` to verify request creation even when web link fallback is unavailable
+
+## ngrok tunnel does not come up
+
+- verify `humanAuth.tunnel.provider=ngrok` and `humanAuth.tunnel.ngrok.enabled=true`
+- verify `NGROK_AUTHTOKEN` (or `humanAuth.tunnel.ngrok.authtoken`) is set
+- confirm `ngrok` executable exists in PATH or set `humanAuth.tunnel.ngrok.executable`
+- inspect gateway logs for `[human-auth][ngrok]` startup errors
+
+## Human-auth request always times out
+
+- check phone can reach `humanAuth.publicBaseUrl`
+- if LAN mode, verify host/port reachability from phone network
+- if ngrok mode, verify tunnel URL is active and not blocked
+- increase `humanAuth.requestTimeoutSec` when approvals need more time
+
 ## Scripts blocked unexpectedly
 
 - inspect `result.json` and `stderr.log` in run directory

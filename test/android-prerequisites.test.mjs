@@ -44,3 +44,15 @@ test("ensureAndroidPrerequisites supports skip mode for CI/tests", async () => {
     }
   });
 });
+
+test("strict mode uses only Google Play system image candidates", () => {
+  const { getSystemImageCandidates } = require("../dist/environment/android-prerequisites.js");
+  assert.equal(typeof getSystemImageCandidates, "function");
+
+  const candidates = getSystemImageCandidates();
+  assert.equal(candidates.length > 0, true);
+  assert.equal(
+    candidates.every((pkg) => pkg.includes(";google_apis_playstore;")),
+    true,
+  );
+});

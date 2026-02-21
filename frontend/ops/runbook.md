@@ -9,6 +9,7 @@ This runbook focuses on day-to-day operation of the current runtime.
 3. Run onboarding if first launch.
 4. Start emulator and check booted device.
 5. Start gateway or run tasks from CLI.
+6. Validate human-auth readiness if remote approvals are enabled.
 
 Commands:
 
@@ -22,6 +23,12 @@ openpocket gateway start
 
 If the launcher is not in PATH yet, use `node dist/cli.js <command>`.
 
+Human-auth readiness checks:
+
+- `humanAuth.enabled` and `humanAuth.useLocalRelay` in config
+- `humanAuth.relayBaseUrl` / `humanAuth.publicBaseUrl` populated after gateway boot
+- if ngrok mode is enabled, verify `NGROK_AUTHTOKEN` (or config token) is available
+
 ## Monitoring
 
 - gateway terminal logs show accepted task, step progress, and final status
@@ -29,11 +36,14 @@ If the launcher is not in PATH yet, use `node dist/cli.js <command>`.
 - cron execution status is persisted in `state/cron-state.json`
 - each task writes a session markdown file
 - each task appends one line to daily memory file
+- human-auth relay requests are persisted in `state/human-auth-relay/requests.json`
+- uploaded auth artifacts are stored in `state/human-auth-artifacts/`
 
 ## Safe Stop
 
 - use `/stop` in Telegram to request cancellation
 - runtime checks stop flag between steps and finalizes session as failed with stop reason
+- for blocked auth requests, use `/auth pending` and resolve with `/auth approve|reject`
 
 ## Data Retention
 

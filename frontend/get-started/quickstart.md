@@ -10,6 +10,7 @@ OpenPocket runs automation on a local Android emulator, so tasks do not consume 
 - Android SDK Emulator and platform-tools (`adb`)
 - At least one Android AVD
 - API key for your configured model profile
+- Telegram bot token (for gateway mode)
 
 You do not need to root or modify your personal phone to use OpenPocket.
 
@@ -60,8 +61,10 @@ On first `onboard`, OpenPocket creates:
 - user consent
 - model profile selection (GPT/Claude/AutoGLM profiles)
 - provider-specific API key setup based on selected model
+- Telegram token source and chat allowlist policy
 - option prompts use Up/Down arrows + Enter
 - emulator wake-up + manual Gmail login for Play Store
+- human-auth mode selection (`disabled`, `LAN relay`, `local relay + ngrok`)
 - Android dependency doctor + auto-install on macOS when required (includes Java 17+ runtime for sdkmanager)
 - existing AVD reuse to avoid repeated heavy system-image/bootstrap downloads on later onboard runs
 
@@ -87,6 +90,8 @@ Optional:
 ```bash
 export OPENPOCKET_HOME="$HOME/.openpocket"
 export AUTOGLM_API_KEY="<optional>"
+export OPENPOCKET_HUMAN_AUTH_KEY="<optional relay api key>"
+export NGROK_AUTHTOKEN="<optional ngrok token>"
 ```
 
 ## Command Check
@@ -121,9 +126,14 @@ OpenPocket supports two operating styles:
 
 This allows practical handoff between manual and automated execution.
 
+Current remote human-in-the-loop support:
+
+- if agent emits `request_human_auth`, gateway can issue a one-time approval link
+- user can approve/reject from phone browser, or use `/auth approve|reject` in Telegram
+
 Planned next step:
 
-- connect from user phone to the local runtime for remote human-in-the-loop control
+- broader phone-side remote controls (pause/resume/retry beyond auth-only checkpoints)
 
 ## Telegram Gateway
 
@@ -132,3 +142,9 @@ openpocket gateway start
 ```
 
 Then chat with your bot and send `/help`.
+
+For auth workflow testing, use:
+
+- `/auth pending`
+- `/auth approve <request-id> [note]`
+- `/auth reject <request-id> [note]`

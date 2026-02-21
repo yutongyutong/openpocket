@@ -19,7 +19,8 @@ OpenPocket is a local emulator-first phone-use agent aimed at real consumer scen
 - no resource usage on the user’s main phone during agent runs
 - local data and permission boundary by default
 - dual control model: direct human control + agent control
-- upcoming remote phone control for human-in-the-loop interaction
+- remote human-auth approvals from phone (one-time web link + Telegram fallback)
+- broader remote phone control as a next expansion phase
 
 ## Doc Hubs
 

@@ -45,6 +45,14 @@ Per-step block template:
 ```
 ````
 
+For human-auth steps, `execution_result` may include:
+
+```text
+Human auth approved|rejected|timeout request_id=<id> message=<summary>
+human_artifact=<absolute path, optional>
+local_screenshot=<absolute path, optional>
+```
+
 Final block template:
 
 ```md
@@ -121,3 +129,19 @@ Files:
   "stderr": "..."
 }
 ```
+
+## Human Auth Artifact
+
+When remote approval uploads an artifact (for example a camera snapshot), bridge stores it under:
+
+```text
+state/human-auth-artifacts/<requestId>.<ext>
+```
+
+Extension mapping is inferred from mime type:
+
+- `image/png` -> `.png`
+- `image/jpeg` -> `.jpg`
+- `image/webp` -> `.webp`
+- `application/json` -> `.json`
+- unknown -> `.bin`

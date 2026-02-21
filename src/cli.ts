@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import * as readline from "node:readline";
 import { createInterface, type Interface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
@@ -13,19 +12,14 @@ import { loadConfig, saveConfig } from "./config";
 import { EmulatorManager } from "./device/emulator-manager";
 import { TelegramGateway } from "./gateway/telegram-gateway";
 import { runGatewayLoop } from "./gateway/run-loop";
+import { DashboardServer, type DashboardGatewayStatus } from "./dashboard/server";
 import { HumanAuthRelayServer } from "./human-auth/relay-server";
 import { SkillLoader } from "./skills/skill-loader";
 import { ScriptExecutor } from "./tools/script-executor";
 import { runSetupWizard } from "./onboarding/setup-wizard";
 import { installCliShortcut } from "./install/cli-shortcut";
 import { ensureAndroidPrerequisites } from "./environment/android-prerequisites";
-
-const DEFAULT_PANEL_RELEASE_URL = "https://github.com/SergioChan/openpocket/releases/latest";
-
-type GithubReleaseAsset = {
-  name: string;
-  browser_download_url: string;
-};
+import { PermissionLabManager } from "./test/permission-lab";
 
 function printHelp(): void {
   // eslint-disable-next-line no-console
@@ -46,10 +40,11 @@ Usage:
   openpocket [--config <path>] agent [--model <name>] <task>
   openpocket [--config <path>] skills list
   openpocket [--config <path>] script run [--file <path> | --text <script>] [--timeout <sec>]
-  openpocket [--config <path>] telegram setup
+  openpocket [--config <path>] telegram setup|whoami
   openpocket [--config <path>] gateway [start|telegram]
+  openpocket [--config <path>] dashboard start [--host <host>] [--port <port>]
+  openpocket [--config <path>] test permission-app [deploy|install|launch|reset|uninstall|task] [--device <id>] [--clean] [--send] [--chat <id>]
   openpocket [--config <path>] human-auth-relay start [--host <host>] [--port <port>] [--public-base-url <url>] [--api-key <key>] [--state-file <path>]
-  openpocket panel start
 
 Legacy aliases (deprecated):
   openpocket [--config <path>] init
@@ -63,286 +58,77 @@ Examples:
   openpocket skills list
   openpocket script run --text "echo hello"
   openpocket telegram setup
+  openpocket telegram whoami
   openpocket gateway start
+  openpocket dashboard start
+  openpocket test permission-app deploy
+  openpocket test permission-app task
+  openpocket test permission-app task --send --chat <id>
   openpocket human-auth-relay start --port 8787
-  openpocket panel start
 `);
 }
 
-function getPanelReleaseUrl(): string {
-  const fromEnv = process.env.OPENPOCKET_PANEL_RELEASE_URL?.trim();
-  if (fromEnv) {
-    return fromEnv;
+function openUrlInBrowser(url: string): void {
+  if (process.platform === "darwin") {
+    spawnSync("/usr/bin/open", [url], { stdio: "ignore" });
+    return;
   }
-
-  try {
-    const packageJsonPath = path.resolve(__dirname, "..", "package.json");
-    const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as {
-      homepage?: string;
-      repository?: string | { url?: string };
-    };
-    if (pkg.homepage?.trim()) {
-      return pkg.homepage.includes("/releases")
-        ? pkg.homepage
-        : `${pkg.homepage.replace(/\/$/, "")}/releases/latest`;
-    }
-    const repoUrlRaw =
-      typeof pkg.repository === "string"
-        ? pkg.repository
-        : pkg.repository?.url;
-    const repoUrl = repoUrlRaw?.replace(/^git\+/, "").replace(/\.git$/, "");
-    if (repoUrl?.includes("github.com")) {
-      const normalized = repoUrl.replace(/^git@github.com:/, "https://github.com/");
-      return `${normalized.replace(/\/$/, "")}/releases/latest`;
-    }
-  } catch {
-    // ignore and fallback
+  if (process.platform === "linux") {
+    spawnSync("xdg-open", [url], { stdio: "ignore" });
+    return;
   }
-
-  return DEFAULT_PANEL_RELEASE_URL;
+  if (process.platform === "win32") {
+    spawnSync("cmd", ["/c", "start", "", url], { stdio: "ignore", shell: false });
+  }
 }
 
-function resolveInstalledPanelApp(): string | null {
-  const home = process.env.HOME ?? "";
-  const candidates = [
-    "/Applications/OpenPocket Control Panel.app",
-    path.join(home, "Applications", "OpenPocket Control Panel.app"),
-    "/Applications/OpenPocketMenuBar.app",
-    path.join(home, "Applications", "OpenPocketMenuBar.app"),
-  ].filter(Boolean);
-
-  for (const appPath of candidates) {
-    if (fs.existsSync(appPath)) {
-      return appPath;
-    }
-  }
-  return null;
-}
-
-function installedPanelExecutable(appPath: string): string | null {
-  const names = ["OpenPocketMenuBar", "OpenPocket Control Panel"];
-  for (const name of names) {
-    const candidate = path.join(appPath, "Contents", "MacOS", name);
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-function panelProcessRunning(executablePath: string): boolean {
-  const probe = spawnSync("/usr/bin/pgrep", ["-f", executablePath], { stdio: "ignore" });
-  return (probe.status ?? 1) === 0;
-}
-
-function openPanelApp(appPath: string, env?: NodeJS.ProcessEnv): boolean {
-  const executable = installedPanelExecutable(appPath);
-  if (executable && panelProcessRunning(executable)) {
-    return true;
-  }
-
-  if (executable) {
-    const child = spawn(executable, [], {
-      detached: true,
-      stdio: "ignore",
-      env: env ?? process.env,
-    });
-    child.unref();
-    return true;
-  }
-
-  const result = spawnSync("/usr/bin/open", [appPath], { stdio: "ignore", env: env ?? process.env });
-  return (result.status ?? 1) === 0;
-}
-
-function openReleasePage(url: string): void {
-  spawnSync("/usr/bin/open", [url], { stdio: "ignore" });
-}
-
-function parseGithubRepoFromReleaseUrl(releaseUrl: string): { owner: string; repo: string } | null {
-  const match = releaseUrl.match(/github\.com\/([^/]+)\/([^/]+)/i);
-  if (!match?.[1] || !match?.[2]) {
-    return null;
-  }
-  return {
-    owner: match[1],
-    repo: match[2].replace(/\.git$/i, ""),
-  };
-}
-
-function fetchLatestGithubReleaseAssets(releaseUrl: string): GithubReleaseAsset[] {
-  const parsed = parseGithubRepoFromReleaseUrl(releaseUrl);
-  if (!parsed) {
-    throw new Error(`Cannot parse GitHub repo from URL: ${releaseUrl}`);
-  }
-
-  const apiUrl = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/releases/latest`;
-  const response = spawnSync(
-    "/usr/bin/curl",
-    [
-      "-fsSL",
-      "-H",
-      "Accept: application/vnd.github+json",
-      "-H",
-      "User-Agent: openpocket-cli",
-      apiUrl,
-    ],
-    { encoding: "utf-8" },
-  );
-  if ((response.status ?? 1) !== 0) {
-    throw new Error(`Failed to query GitHub releases API: ${response.stderr || "curl exited with error"}`);
-  }
-
-  const parsedJson = JSON.parse(response.stdout) as { assets?: unknown };
-  if (!Array.isArray(parsedJson.assets)) {
+function findGatewayProcessPids(): number[] {
+  const ps = spawnSync("/bin/ps", ["-axo", "pid=,command="], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if ((ps.status ?? 1) !== 0 || !ps.stdout) {
     return [];
   }
 
-  return parsedJson.assets
-    .map((entry) => {
-      if (!entry || typeof entry !== "object") {
-        return null;
-      }
-      const item = entry as { name?: unknown; browser_download_url?: unknown };
-      const name = typeof item.name === "string" ? item.name : "";
-      const browserDownloadUrl =
-        typeof item.browser_download_url === "string" ? item.browser_download_url : "";
-      if (!name || !browserDownloadUrl) {
-        return null;
-      }
-      return {
-        name,
-        browser_download_url: browserDownloadUrl,
-      } satisfies GithubReleaseAsset;
-    })
-    .filter((asset): asset is GithubReleaseAsset => Boolean(asset));
+  const currentPid = process.pid;
+  const matches: number[] = [];
+  for (const rawLine of ps.stdout.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    const match = line.match(/^(\d+)\s+(.*)$/);
+    if (!match?.[1] || !match[2]) {
+      continue;
+    }
+    const pid = Number(match[1]);
+    if (!Number.isFinite(pid) || pid === currentPid) {
+      continue;
+    }
+    const command = match[2].toLowerCase();
+    if (!command.includes("gateway start")) {
+      continue;
+    }
+    if (
+      command.includes("openpocket")
+      || command.includes("/dist/cli.js")
+      || command.includes("/src/cli.ts")
+    ) {
+      matches.push(pid);
+    }
+  }
+
+  return [...new Set(matches)].sort((a, b) => a - b);
 }
 
-function pickPanelReleaseAsset(assets: GithubReleaseAsset[]): GithubReleaseAsset | null {
-  const scored = assets
-    .filter((asset) => asset.name.toLowerCase().endsWith(".zip"))
-    .map((asset) => {
-      const lower = asset.name.toLowerCase();
-      let score = 0;
-      if (lower.includes("panel") || lower.includes("menubar")) {
-        score += 8;
-      }
-      if (lower.includes("mac") || lower.includes("darwin") || lower.includes("osx")) {
-        score += 5;
-      }
-      if (lower.includes("control")) {
-        score += 2;
-      }
-      if (lower.includes("linux") || lower.includes("windows") || lower.includes("win")) {
-        score -= 10;
-      }
-      return {
-        asset,
-        score,
-        hasPanelName: lower.includes("panel") || lower.includes("menubar"),
-        hasMacHint: lower.includes("mac") || lower.includes("darwin") || lower.includes("osx"),
-      };
-    })
-    .filter((item) => item.hasPanelName && item.hasMacHint)
-    .sort((a, b) => b.score - a.score);
-
-  return scored[0]?.asset ?? null;
-}
-
-function findAppBundle(rootDir: string): string | null {
-  if (!fs.existsSync(rootDir)) {
-    return null;
-  }
-  const stack = [rootDir];
-  while (stack.length > 0) {
-    const current = stack.pop() as string;
-    const entries = fs.readdirSync(current, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-      const absolute = path.join(current, entry.name);
-      if (entry.name.endsWith(".app")) {
-        return absolute;
-      }
-      stack.push(absolute);
-    }
-  }
-  return null;
-}
-
-function installPanelFromRelease(
-  releaseUrl: string,
-  log?: (line: string) => void,
-): string {
-  if (process.platform !== "darwin") {
-    throw new Error("Panel auto-install is supported on macOS only.");
-  }
-
-  log?.("1/4 Pull panel package from GitHub release");
-  const assets = fetchLatestGithubReleaseAssets(releaseUrl);
-  const picked = pickPanelReleaseAsset(assets);
-  if (!picked) {
-    throw new Error("No macOS .zip panel asset found in latest release.");
-  }
-
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openpocket-panel-install-"));
-  try {
-    const zipPath = path.join(tmpDir, picked.name);
-    const download = spawnSync("/usr/bin/curl", ["-fL", picked.browser_download_url, "-o", zipPath], {
-      encoding: "utf-8",
-      stdio: "pipe",
-    });
-    if ((download.status ?? 1) !== 0) {
-      throw new Error(`Failed to download ${picked.name}: ${download.stderr || "curl exited with error"}`);
-    }
-
-    log?.("2/4 Unpack panel ZIP");
-    const unpackDir = path.join(tmpDir, "unpacked");
-    fs.mkdirSync(unpackDir, { recursive: true });
-    const unpack = spawnSync("/usr/bin/ditto", ["-x", "-k", zipPath, unpackDir], {
-      encoding: "utf-8",
-      stdio: "pipe",
-    });
-    if ((unpack.status ?? 1) !== 0) {
-      throw new Error(`Failed to unpack ${picked.name}: ${unpack.stderr || "ditto exited with error"}`);
-    }
-
-    const appBundle = findAppBundle(unpackDir);
-    if (!appBundle) {
-      throw new Error(`No .app bundle found in ${picked.name}`);
-    }
-
-    const home = process.env.HOME?.trim();
-    if (!home) {
-      throw new Error("HOME is not set; cannot install panel app.");
-    }
-    log?.("3/4 Install panel app bundle");
-    const appsDir = path.join(home, "Applications");
-    fs.mkdirSync(appsDir, { recursive: true });
-    const targetApp = path.join(appsDir, path.basename(appBundle));
-    fs.rmSync(targetApp, { recursive: true, force: true });
-    const copy = spawnSync("/usr/bin/ditto", [appBundle, targetApp], {
-      encoding: "utf-8",
-      stdio: "pipe",
-    });
-    if ((copy.status ?? 1) !== 0) {
-      throw new Error(`Failed to install app bundle: ${copy.stderr || "ditto exited with error"}`);
-    }
-
-    spawnSync("/usr/bin/xattr", ["-dr", "com.apple.quarantine", targetApp], { stdio: "ignore" });
-    log?.("4/4 Verify panel installation");
-    if (!fs.existsSync(targetApp)) {
-      throw new Error(`Panel install verification failed: ${targetApp} not found.`);
-    }
-    const installed = resolveInstalledPanelApp();
-    if (!installed) {
-      throw new Error("Panel install verification failed: app bundle is not discoverable.");
-    }
-    return installed;
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+function standaloneDashboardGatewayStatus(): DashboardGatewayStatus {
+  const pids = findGatewayProcessPids();
+  return {
+    running: pids.length > 0,
+    managed: false,
+    note: pids.length > 0 ? `detected gateway pid(s): ${pids.join(", ")}` : "no gateway process detected",
+  };
 }
 
 function takeOption(args: string[], name: string): { value: string | null; rest: string[] } {
@@ -510,12 +296,31 @@ async function runGatewayCommand(configPath: string | undefined, args: string[])
   await runGatewayLoop({
     start: async () => {
       const cfg = loadConfig(configPath);
+      const shortcut = installCliShortcut();
       const envName = cfg.telegram.botTokenEnv?.trim() || "TELEGRAM_BOT_TOKEN";
       const hasToken = Boolean(cfg.telegram.botToken.trim() || process.env[envName]?.trim());
       const totalSteps = 6;
+      let gateway: TelegramGateway | null = null;
+      let dashboard: DashboardServer | null = null;
 
       printStartupHeader(cfg);
       printStartupStep(1, totalSteps, "Load config", "ok");
+      if (shortcut.shellRcUpdated.length > 0 || !shortcut.binDirAlreadyInPath) {
+        // eslint-disable-next-line no-console
+        console.log(`[OpenPocket][gateway-start] CLI launcher ensured: ${shortcut.commandPath}`);
+        if (shortcut.preferredPathCommandPath) {
+          // eslint-disable-next-line no-console
+          console.log(`[OpenPocket][gateway-start] Current-shell launcher: ${shortcut.preferredPathCommandPath}`);
+        }
+        if (shortcut.shellRcUpdated.length > 0) {
+          // eslint-disable-next-line no-console
+          console.log(`[OpenPocket][gateway-start] Updated shell rc: ${shortcut.shellRcUpdated.join(", ")}`);
+        }
+        // eslint-disable-next-line no-console
+        console.log(
+          "[OpenPocket][gateway-start] Reload shell profile (or open a new terminal) before using `openpocket` without `./`.",
+        );
+      }
       if (!hasToken) {
         printStartupStep(2, totalSteps, "Validate Telegram token", "failed");
         throw new Error(
@@ -549,27 +354,71 @@ async function runGatewayCommand(configPath: string | undefined, args: string[])
         );
       }
 
-      if (process.platform === "darwin") {
-        printStartupStep(4, totalSteps, "Ensure panel is running", "starting");
-        await runPanelCommand(configPath, ["start"]);
-        printStartupStep(4, totalSteps, "Ensure panel is running", "ok");
+      if (cfg.dashboard.enabled) {
+        printStartupStep(4, totalSteps, "Ensure local dashboard", "starting");
+        const createDashboard = (port: number): DashboardServer =>
+          new DashboardServer({
+            config: cfg,
+            mode: "integrated",
+            host: cfg.dashboard.host,
+            port,
+            getGatewayStatus: () => ({
+              running: gateway?.isRunning() ?? false,
+              managed: true,
+              note:
+                gateway?.isRunning()
+                  ? "managed by current gateway process"
+                  : "gateway initializing",
+            }),
+          });
+
+        try {
+          dashboard = createDashboard(cfg.dashboard.port);
+          await dashboard.start();
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code === "EADDRINUSE") {
+            dashboard = createDashboard(0);
+            await dashboard.start();
+          } else {
+            throw error;
+          }
+        }
+
+        printStartupStep(4, totalSteps, "Ensure local dashboard", `ok (${dashboard.address})`);
+        if (cfg.dashboard.autoOpenBrowser) {
+          openUrlInBrowser(dashboard.address);
+          // eslint-disable-next-line no-console
+          console.log(`[OpenPocket][gateway-start] Dashboard opened in browser: ${dashboard.address}`);
+        }
       } else {
-        printStartupStep(4, totalSteps, "Ensure panel is running", "skipped (macOS only)");
+        printStartupStep(4, totalSteps, "Ensure local dashboard", "skipped (disabled in config)");
       }
 
       printStartupStep(5, totalSteps, "Initialize gateway runtime", "starting");
-      const gateway = new TelegramGateway(cfg);
+      gateway = new TelegramGateway(cfg, {
+        onLogLine: (line) => {
+          dashboard?.ingestExternalLogLine(line);
+        },
+      });
       printStartupStep(5, totalSteps, "Initialize gateway runtime", "ok");
       printStartupStep(6, totalSteps, "Start services", "starting");
       await gateway.start();
       printStartupStep(6, totalSteps, "Start services", "ok");
       // eslint-disable-next-line no-console
       console.log("[OpenPocket][gateway-start] Gateway is running. Press Ctrl+C to stop.");
+      if (dashboard) {
+        // eslint-disable-next-line no-console
+        console.log(`[OpenPocket][gateway-start] Dashboard URL: ${dashboard.address}`);
+      }
       return {
         stop: async (reason?: string) => {
           // eslint-disable-next-line no-console
           console.log(`[OpenPocket][gateway-start] Stopping gateway (${reason ?? "run-loop-stop"})`);
-          await gateway.stop(reason ?? "run-loop-stop");
+          await gateway?.stop(reason ?? "run-loop-stop");
+          if (dashboard) {
+            await dashboard.stop();
+          }
         },
       };
     },
@@ -619,15 +468,17 @@ function installCliShortcutOnFirstOnboard(cfg: ReturnType<typeof loadConfig>): v
 
   // eslint-disable-next-line no-console
   console.log(`[OpenPocket][onboard] CLI launcher installed: ${shortcut.commandPath}`);
+  if (shortcut.preferredPathCommandPath) {
+    // eslint-disable-next-line no-console
+    console.log(`[OpenPocket][onboard] Current-shell launcher: ${shortcut.preferredPathCommandPath}`);
+  }
   if (shortcut.shellRcUpdated.length > 0) {
     // eslint-disable-next-line no-console
     console.log(`[OpenPocket][onboard] Updated shell rc: ${shortcut.shellRcUpdated.join(", ")}`);
   }
   if (!shortcut.binDirAlreadyInPath || shortcut.shellRcUpdated.length > 0) {
     // eslint-disable-next-line no-console
-    console.log(
-      "[OpenPocket][onboard] Restart shell (or `source ~/.zshrc` / `source ~/.bashrc`) to use `openpocket` directly.",
-    );
+    console.log("[OpenPocket][onboard] Reload shell profile (or open a new terminal) to use `openpocket` directly.");
   }
 }
 
@@ -642,13 +493,17 @@ async function runInstallCliCommand(): Promise<number> {
   const shortcut = installCliShortcut();
   // eslint-disable-next-line no-console
   console.log(`CLI launcher installed: ${shortcut.commandPath}`);
+  if (shortcut.preferredPathCommandPath) {
+    // eslint-disable-next-line no-console
+    console.log(`Current-shell launcher: ${shortcut.preferredPathCommandPath}`);
+  }
   if (shortcut.shellRcUpdated.length > 0) {
     // eslint-disable-next-line no-console
     console.log(`Updated shell rc: ${shortcut.shellRcUpdated.join(", ")}`);
   }
   if (!shortcut.binDirAlreadyInPath || shortcut.shellRcUpdated.length > 0) {
     // eslint-disable-next-line no-console
-    console.log("Restart shell (or `source ~/.zshrc` / `source ~/.bashrc`) to use `openpocket` directly.");
+    console.log("Reload shell profile (or open a new terminal) to use `openpocket` directly.");
   }
   return 0;
 }
@@ -736,6 +591,205 @@ function parseAllowedChatIds(raw: string): number[] {
     throw new Error("Allowed chat IDs must be numbers.");
   }
   return values.map((value) => Math.trunc(value));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function resolveTelegramTokenSource(cfg: ReturnType<typeof loadConfig>): {
+  envName: string;
+  token: string;
+  source: string;
+} {
+  const envName = cfg.telegram.botTokenEnv?.trim() || "TELEGRAM_BOT_TOKEN";
+  const configToken = cfg.telegram.botToken.trim();
+  const envToken = process.env[envName]?.trim() ?? "";
+  if (configToken) {
+    return { envName, token: configToken, source: "config.json" };
+  }
+  if (envToken) {
+    return { envName, token: envToken, source: `env:${envName}` };
+  }
+  return { envName, token: "", source: `missing (${envName})` };
+}
+
+type TelegramChatCandidate = {
+  id: number;
+  type: string;
+  title: string;
+  source: string;
+};
+
+function extractChatCandidate(value: unknown, source: string): TelegramChatCandidate | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const idRaw = value.id;
+  const id = typeof idRaw === "number" ? Math.trunc(idRaw) : Number.NaN;
+  if (!Number.isFinite(id)) {
+    return null;
+  }
+  const type = String(value.type ?? "unknown");
+  const title = String(
+    value.title ??
+      [value.first_name, value.last_name].filter((item) => typeof item === "string" && item.trim()).join(" ") ??
+      value.username ??
+      "",
+  ).trim();
+  return {
+    id,
+    type,
+    title: title || "(untitled)",
+    source,
+  };
+}
+
+function collectTelegramChatCandidates(update: unknown): TelegramChatCandidate[] {
+  const row = isRecord(update) ? update : null;
+  if (!row) {
+    return [];
+  }
+  const out: TelegramChatCandidate[] = [];
+  const push = (chat: unknown, source: string) => {
+    const parsed = extractChatCandidate(chat, source);
+    if (parsed) {
+      out.push(parsed);
+    }
+  };
+
+  if (isRecord(row.message)) {
+    push(row.message.chat, "message");
+  }
+  if (isRecord(row.edited_message)) {
+    push(row.edited_message.chat, "edited_message");
+  }
+  if (isRecord(row.channel_post)) {
+    push(row.channel_post.chat, "channel_post");
+  }
+  if (isRecord(row.edited_channel_post)) {
+    push(row.edited_channel_post.chat, "edited_channel_post");
+  }
+  if (isRecord(row.callback_query) && isRecord(row.callback_query.message)) {
+    push(row.callback_query.message.chat, "callback_query.message");
+  }
+  if (isRecord(row.my_chat_member)) {
+    push(row.my_chat_member.chat, "my_chat_member");
+  }
+  if (isRecord(row.chat_member)) {
+    push(row.chat_member.chat, "chat_member");
+  }
+
+  return out;
+}
+
+async function runTelegramWhoamiCommand(cfg: ReturnType<typeof loadConfig>): Promise<number> {
+  const tokenInfo = resolveTelegramTokenSource(cfg);
+  const allow = cfg.telegram.allowedChatIds;
+  const allowPolicy = allow.length > 0 ? "allow_only_listed" : "allow_all";
+
+  // eslint-disable-next-line no-console
+  console.log("[OpenPocket] Telegram identity");
+  // eslint-disable-next-line no-console
+  console.log(`  token source: ${tokenInfo.source}`);
+  // eslint-disable-next-line no-console
+  console.log(`  allow policy: ${allowPolicy}`);
+  // eslint-disable-next-line no-console
+  console.log(
+    `  allowlist: ${allow.length > 0 ? allow.map((id) => String(id)).join(", ") : "empty (all chats allowed)"}`,
+  );
+
+  if (!tokenInfo.token) {
+    // eslint-disable-next-line no-console
+    console.log(`\nTelegram token is not configured. Set config.telegram.botToken or env ${tokenInfo.envName}.`);
+    return 0;
+  }
+
+  const apiBase = `https://api.telegram.org/bot${tokenInfo.token}`;
+  let botName = "(unknown)";
+  try {
+    const getMeResp = await fetch(`${apiBase}/getMe`);
+    const getMeText = await getMeResp.text();
+    if (getMeResp.ok) {
+      const getMeJson = JSON.parse(getMeText) as unknown;
+      if (isRecord(getMeJson) && getMeJson.ok === true && isRecord(getMeJson.result)) {
+        const username = String(getMeJson.result.username ?? "").trim();
+        const id = Number(getMeJson.result.id ?? Number.NaN);
+        botName = `${username ? `@${username}` : "(no username)"}${Number.isFinite(id) ? ` (id=${id})` : ""}`;
+      }
+    }
+  } catch {
+    // Ignore getMe failure and continue with updates probe.
+  }
+
+  // eslint-disable-next-line no-console
+  console.log(`  bot: ${botName}`);
+
+  try {
+    const updatesResp = await fetch(`${apiBase}/getUpdates`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        timeout: 0,
+        limit: 30,
+        allowed_updates: [
+          "message",
+          "edited_message",
+          "channel_post",
+          "edited_channel_post",
+          "callback_query",
+          "my_chat_member",
+          "chat_member",
+        ],
+      }),
+    });
+    const updatesText = await updatesResp.text();
+    if (!updatesResp.ok) {
+      throw new Error(`HTTP ${updatesResp.status}: ${updatesText.slice(0, 300)}`);
+    }
+
+    const updatesJson = JSON.parse(updatesText) as unknown;
+    if (!isRecord(updatesJson) || updatesJson.ok !== true || !Array.isArray(updatesJson.result)) {
+      throw new Error("Unexpected getUpdates response.");
+    }
+
+    const seen = new Map<number, TelegramChatCandidate>();
+    for (const row of updatesJson.result) {
+      for (const chat of collectTelegramChatCandidates(row)) {
+        if (!seen.has(chat.id)) {
+          seen.set(chat.id, chat);
+        }
+      }
+    }
+
+    if (seen.size === 0) {
+      // eslint-disable-next-line no-console
+      console.log("\nNo chat IDs discovered from recent updates.");
+      // eslint-disable-next-line no-console
+      console.log("Send one message to your bot in Telegram, then run `openpocket telegram whoami` again.");
+      return 0;
+    }
+
+    // eslint-disable-next-line no-console
+    console.log("\nDiscovered chat IDs:");
+    for (const chat of seen.values()) {
+      const allowed = allow.length === 0 || allow.includes(chat.id);
+      // eslint-disable-next-line no-console
+      console.log(
+        `  - ${chat.id} | type=${chat.type} | title=${chat.title} | source=${chat.source} | allowed=${allowed}`,
+      );
+    }
+    return 0;
+  } catch (error) {
+    const message = (error as Error).message || "unknown error";
+    // eslint-disable-next-line no-console
+    console.log(`\nUnable to query recent Telegram updates: ${message}`);
+    // eslint-disable-next-line no-console
+    console.log("If gateway is running, polling conflict can happen. Stop gateway and retry this command.");
+    return 0;
+  }
 }
 
 const ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -865,15 +919,19 @@ async function runTelegramSetupCommand(
   args: string[],
 ): Promise<number> {
   const sub = (args[0] ?? "setup").trim();
-  if (sub !== "setup") {
-    throw new Error(`Unknown telegram subcommand: ${sub}. Use: telegram setup`);
+  if (sub !== "setup" && sub !== "whoami") {
+    throw new Error(`Unknown telegram subcommand: ${sub}. Use: telegram setup|whoami`);
+  }
+
+  const cfg = loadConfig(configPath);
+  if (sub === "whoami") {
+    return runTelegramWhoamiCommand(cfg);
   }
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error("`telegram setup` requires an interactive terminal (TTY).");
   }
 
-  const cfg = loadConfig(configPath);
   const rl = createInterface({ input, output });
   try {
     // eslint-disable-next-line no-console
@@ -989,51 +1047,58 @@ async function runTelegramSetupCommand(
   }
 }
 
-async function runPanelCommand(configPath: string | undefined, args: string[]): Promise<number> {
+async function runDashboardCommand(configPath: string | undefined, args: string[]): Promise<number> {
   const sub = (args[0] ?? "start").trim();
   if (sub !== "start") {
-    throw new Error(`Unknown panel subcommand: ${sub}. Use: panel start`);
+    throw new Error(`Unknown dashboard subcommand: ${sub}. Use: dashboard start`);
   }
 
-  if (process.platform !== "darwin") {
-    throw new Error("OpenPocket menu bar panel is supported on macOS only.");
+  const { value: hostOption, rest: afterHost } = takeOption(args.slice(1), "--host");
+  const { value: portOption, rest } = takeOption(afterHost, "--port");
+  if (rest.length > 0) {
+    throw new Error(`Unexpected dashboard arguments: ${rest.join(" ")}`);
   }
 
-  const launchEnv = { ...process.env };
-  const resolvedConfigPath = configPath?.trim() ? path.resolve(configPath.trim()) : "";
-  if (resolvedConfigPath) {
-    launchEnv.OPENPOCKET_CONFIG_PATH = resolvedConfigPath;
-  }
-  const repoRoot = path.resolve(__dirname, "..");
-  launchEnv.OPENPOCKET_REPO_ROOT = repoRoot;
-  const localLauncher = path.join(repoRoot, "openpocket");
-  if (fs.existsSync(localLauncher)) {
-    launchEnv.OPENPOCKET_CLI_PATH = localLauncher;
-  }
+  const cfg = loadConfig(configPath);
+  const parsedPort = Number(portOption ?? String(cfg.dashboard.port));
+  const port = Number.isFinite(parsedPort)
+    ? Math.max(1, Math.min(65535, Math.round(parsedPort)))
+    : cfg.dashboard.port;
+  const host = hostOption?.trim() || cfg.dashboard.host || "127.0.0.1";
 
-  const installedApp = resolveInstalledPanelApp();
-  if (installedApp) {
-    if (openPanelApp(installedApp, launchEnv)) {
-      // eslint-disable-next-line no-console
-      console.log(`OpenPocket Control Panel opened: ${installedApp}`);
-      return 0;
-    }
-    // eslint-disable-next-line no-console
-    console.log(`[OpenPocket][panel] Installed app could not be opened. Reinstalling: ${installedApp}`);
-  }
-
-  const releaseUrl = getPanelReleaseUrl();
-  // eslint-disable-next-line no-console
-  console.log("OpenPocket panel is required and not installed. Installing from GitHub Release...");
-  const installedFromRelease = installPanelFromRelease(releaseUrl, (line) => {
-    // eslint-disable-next-line no-console
-    console.log(`[OpenPocket][panel-install] ${line}`);
+  const dashboard = new DashboardServer({
+    config: cfg,
+    mode: "standalone",
+    host,
+    port,
+    getGatewayStatus: standaloneDashboardGatewayStatus,
   });
-  if (!openPanelApp(installedFromRelease, launchEnv)) {
-    throw new Error(`Panel installed but failed to open: ${installedFromRelease}`);
-  }
+
+  await dashboard.start();
   // eslint-disable-next-line no-console
-  console.log(`OpenPocket Control Panel installed and opened: ${installedFromRelease}`);
+  console.log(`[OpenPocket][dashboard] started at ${dashboard.address}`);
+  // eslint-disable-next-line no-console
+  console.log("[OpenPocket][dashboard] press Ctrl+C to stop");
+
+  if (cfg.dashboard.autoOpenBrowser) {
+    openUrlInBrowser(dashboard.address);
+    // eslint-disable-next-line no-console
+    console.log(`[OpenPocket][dashboard] opened browser: ${dashboard.address}`);
+  }
+
+  await new Promise<void>((resolve) => {
+    const onSignal = (): void => {
+      process.removeListener("SIGINT", onSignal);
+      process.removeListener("SIGTERM", onSignal);
+      resolve();
+    };
+    process.on("SIGINT", onSignal);
+    process.on("SIGTERM", onSignal);
+  });
+
+  await dashboard.stop();
+  // eslint-disable-next-line no-console
+  console.log("[OpenPocket][dashboard] stopped");
   return 0;
 }
 
@@ -1097,6 +1162,142 @@ async function runHumanAuthRelayCommand(
   return 0;
 }
 
+async function runTestCommand(configPath: string | undefined, args: string[]): Promise<number> {
+  const target = (args[0] ?? "").trim();
+  if (target !== "permission-app") {
+    throw new Error(
+      "Unknown test target. Use: test permission-app [deploy|install|launch|reset|uninstall|task] [--device <id>] [--clean]",
+    );
+  }
+
+  const hasClean = args.includes("--clean");
+  const sendToTelegram = args.includes("--send");
+  const withoutFlags = args.filter((item) => item !== "--clean" && item !== "--send");
+  const { value: deviceId, rest: afterDevice } = takeOption(withoutFlags.slice(1), "--device");
+  const { value: chatIdRaw, rest } = takeOption(afterDevice, "--chat");
+  if (rest.length > 1) {
+    throw new Error(`Unexpected test arguments: ${rest.slice(1).join(" ")}`);
+  }
+  const action = (rest[0] ?? "deploy").trim();
+
+  const cfg = loadConfig(configPath);
+  const permissionLab = new PermissionLabManager(cfg);
+
+  if (action === "task") {
+    const taskText = permissionLab.recommendedTelegramTask();
+    if (!sendToTelegram) {
+      // eslint-disable-next-line no-console
+      console.log(taskText);
+      // eslint-disable-next-line no-console
+      console.log("Tip: add `--send` (and optionally `--chat <id>`) to send this prompt to Telegram directly.");
+      return 0;
+    }
+
+    const envName = cfg.telegram.botTokenEnv?.trim() || "TELEGRAM_BOT_TOKEN";
+    const token = cfg.telegram.botToken.trim() || (process.env[envName]?.trim() ?? "");
+    if (!token) {
+      throw new Error(`Telegram bot token is empty. Set config.telegram.botToken or env ${envName}.`);
+    }
+
+    let chatId: number | null = null;
+    if (chatIdRaw !== null) {
+      const parsed = Number(chatIdRaw);
+      if (!Number.isFinite(parsed)) {
+        throw new Error("Chat ID must be a number.");
+      }
+      chatId = Math.trunc(parsed);
+    } else if (cfg.telegram.allowedChatIds.length === 1) {
+      chatId = cfg.telegram.allowedChatIds[0];
+    } else if (cfg.telegram.allowedChatIds.length > 1) {
+      throw new Error(
+        `Multiple allowed chat IDs configured (${cfg.telegram.allowedChatIds.join(", ")}). Use --chat <id>.`,
+      );
+    } else {
+      throw new Error("No default chat ID found. Use --chat <id> or configure telegram.allowedChatIds.");
+    }
+
+    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: taskText,
+      }),
+    });
+
+    const bodyText = await response.text();
+    if (!response.ok) {
+      throw new Error(`Telegram send failed (${response.status}): ${bodyText.slice(0, 300)}`);
+    }
+    let apiPayload: { ok?: boolean; description?: string } = {};
+    try {
+      apiPayload = JSON.parse(bodyText) as { ok?: boolean; description?: string };
+    } catch {
+      apiPayload = {};
+    }
+    if (apiPayload.ok === false) {
+      throw new Error(`Telegram send failed: ${apiPayload.description ?? "unknown error"}`);
+    }
+    // eslint-disable-next-line no-console
+    console.log(`[OpenPocket][test] PermissionLab prompt sent to Telegram chat ${chatId}.`);
+    return 0;
+  }
+
+  if (action === "deploy" || action === "install") {
+    const shouldLaunch = action === "deploy";
+    // eslint-disable-next-line no-console
+    console.log("[OpenPocket][test] Building and deploying Android PermissionLab...");
+    const deployed = await permissionLab.deploy({
+      deviceId: deviceId ?? undefined,
+      launch: shouldLaunch,
+      clean: hasClean,
+    });
+    // eslint-disable-next-line no-console
+    console.log(`[OpenPocket][test] APK: ${deployed.apkPath}`);
+    // eslint-disable-next-line no-console
+    console.log(`[OpenPocket][test] Device: ${deployed.deviceId}`);
+    // eslint-disable-next-line no-console
+    console.log(`[OpenPocket][test] SDK: ${deployed.sdkRoot}`);
+    // eslint-disable-next-line no-console
+    console.log(`[OpenPocket][test] Build-tools: ${deployed.buildToolsVersion} | Platform: ${deployed.platformVersion}`);
+    // eslint-disable-next-line no-console
+    console.log(`[OpenPocket][test] Install: ${deployed.installOutput || "ok"}`);
+    if (deployed.launchOutput) {
+      // eslint-disable-next-line no-console
+      console.log(`[OpenPocket][test] Launch: ${deployed.launchOutput}`);
+    }
+    // eslint-disable-next-line no-console
+    console.log("[OpenPocket][test] Suggested Telegram task:");
+    // eslint-disable-next-line no-console
+    console.log(permissionLab.recommendedTelegramTask());
+    return 0;
+  }
+
+  if (action === "launch") {
+    // eslint-disable-next-line no-console
+    console.log(permissionLab.launch(deviceId ?? undefined));
+    return 0;
+  }
+
+  if (action === "reset") {
+    // eslint-disable-next-line no-console
+    console.log(permissionLab.reset(deviceId ?? undefined));
+    return 0;
+  }
+
+  if (action === "uninstall") {
+    // eslint-disable-next-line no-console
+    console.log(permissionLab.uninstall(deviceId ?? undefined));
+    return 0;
+  }
+
+  throw new Error(
+    `Unknown permission-app action: ${action}. Use deploy|install|launch|reset|uninstall|task`,
+  );
+}
+
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const { value: configPath, rest } = takeOption(argv, "--config");
 
@@ -1149,12 +1350,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return runTelegramSetupCommand(configPath ?? undefined, rest.slice(1));
   }
 
-  if (command === "panel") {
-    return runPanelCommand(configPath ?? undefined, rest.slice(1));
+  if (command === "dashboard") {
+    return runDashboardCommand(configPath ?? undefined, rest.slice(1));
   }
 
   if (command === "human-auth-relay") {
     return runHumanAuthRelayCommand(configPath ?? undefined, rest.slice(1));
+  }
+
+  if (command === "test") {
+    return runTestCommand(configPath ?? undefined, rest.slice(1));
   }
 
   if (command === "skills") {

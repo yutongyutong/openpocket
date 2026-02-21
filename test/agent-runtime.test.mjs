@@ -217,3 +217,65 @@ test("AgentRuntime fails when request_human_auth is rejected", async () => {
     ModelClient.prototype.nextStep = originalNextStep;
   }
 });
+
+test("AgentRuntime auto-triggers human auth on Android permission dialog app", async () => {
+  const runtime = setupRuntime({ returnHomeOnTaskEnd: false });
+  runtime.config.humanAuth.enabled = true;
+  const authRequests = [];
+  let snapshotCount = 0;
+
+  runtime.adb = {
+    captureScreenSnapshot: () => {
+      snapshotCount += 1;
+      if (snapshotCount === 1) {
+        return {
+          ...makeSnapshot(),
+          currentApp: "com.android.permissioncontroller",
+        };
+      }
+      return makeSnapshot();
+    },
+    executeAction: async () => "ok",
+  };
+  runtime.autoArtifactBuilder = {
+    build: () => ({ skillPath: null, scriptPath: null }),
+  };
+
+  let modelCalls = 0;
+  const originalNextStep = ModelClient.prototype.nextStep;
+  ModelClient.prototype.nextStep = async () => {
+    modelCalls += 1;
+    return {
+      thought: "done",
+      action: { type: "finish", message: "Completed after auto human auth" },
+      raw: '{"thought":"done","action":{"type":"finish","message":"Completed after auto human auth"}}',
+    };
+  };
+
+  try {
+    const result = await runtime.runTask(
+      "auto permission dialog test",
+      undefined,
+      undefined,
+      async (request) => {
+        authRequests.push(request);
+        return {
+          requestId: "req-auto-perm",
+          approved: true,
+          status: "approved",
+          message: "Approved from phone",
+          decidedAt: new Date().toISOString(),
+          artifactPath: null,
+        };
+      },
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(authRequests.length, 1);
+    assert.equal(authRequests[0].capability, "permission");
+    assert.match(authRequests[0].instruction, /system permission dialog/i);
+    assert.equal(modelCalls >= 1, true);
+  } finally {
+    ModelClient.prototype.nextStep = originalNextStep;
+  }
+});

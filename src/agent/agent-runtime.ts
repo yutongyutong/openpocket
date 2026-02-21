@@ -19,6 +19,11 @@ import { ScriptExecutor } from "../tools/script-executor";
 import { ModelClient } from "./model-client";
 import { buildSystemPrompt } from "./prompts";
 
+const AUTO_PERMISSION_DIALOG_PACKAGES = [
+  "permissioncontroller",
+  "packageinstaller",
+];
+
 export class AgentRuntime {
   private readonly config: OpenPocketConfig;
   private readonly workspace: WorkspaceStore;
@@ -131,6 +136,7 @@ export class AgentRuntime {
     const profileKey = modelName ?? this.config.defaultModel;
     const profile = getModelProfile(this.config, profileKey);
     const session = this.workspace.createSession(task, profileKey, profile.model);
+    let lastAutoPermissionAuthAtMs = 0;
 
     try {
       const apiKey = resolveApiKey(profile);
@@ -179,6 +185,109 @@ export class AgentRuntime {
           } catch {
             screenshotPath = null;
           }
+        }
+
+        const autoPermissionDialogDetected =
+          this.config.humanAuth.enabled &&
+          typeof onHumanAuth === "function" &&
+          AUTO_PERMISSION_DIALOG_PACKAGES.some((token) =>
+            snapshot.currentApp.toLowerCase().includes(token),
+          ) &&
+          Date.now() - lastAutoPermissionAuthAtMs >= 15_000;
+
+        if (autoPermissionDialogDetected && onHumanAuth) {
+          lastAutoPermissionAuthAtMs = Date.now();
+          const autoThought =
+            "Detected Android runtime permission dialog. Escalating to human authorization.";
+          const autoAction = {
+            type: "request_human_auth",
+            capability: "permission",
+            instruction:
+              "A system permission dialog is blocking automation. Review and approve or reject this permission from your real device.",
+            timeoutSec: Math.max(30, Math.round(this.config.humanAuth.requestTimeoutSec)),
+            reason: "auto_detected_android_permission_dialog",
+          } as const;
+
+          let decision: HumanAuthDecision;
+          try {
+            decision = await onHumanAuth({
+              sessionId: session.id,
+              sessionPath: session.path,
+              task,
+              step,
+              capability: autoAction.capability,
+              instruction: autoAction.instruction,
+              reason: autoAction.reason ?? autoThought,
+              timeoutSec: autoAction.timeoutSec,
+              currentApp: snapshot.currentApp,
+              screenshotPath,
+            });
+          } catch (error) {
+            decision = {
+              requestId: "local-error",
+              approved: false,
+              status: "rejected",
+              message: `Human auth bridge error: ${(error as Error).message}`,
+              decidedAt: nowIso(),
+              artifactPath: null,
+            };
+          }
+
+          const decisionLine = `Human auth ${decision.status} request_id=${decision.requestId} message=${decision.message}`;
+          const stepResultBase = decision.artifactPath
+            ? `${decisionLine}\nhuman_artifact=${decision.artifactPath}`
+            : decisionLine;
+          const stepResult = screenshotPath
+            ? `${stepResultBase}\nlocal_screenshot=${screenshotPath}`
+            : stepResultBase;
+
+          this.workspace.appendStep(
+            session,
+            step,
+            autoThought,
+            JSON.stringify(autoAction, null, 2),
+            stepResult,
+          );
+          traces.push({
+            step,
+            action: autoAction,
+            result: stepResult,
+            thought: autoThought,
+            currentApp: snapshot.currentApp,
+          });
+          history.push(
+            `step ${step}: app=${snapshot.currentApp} action=request_human_auth(auto_permission_dialog) decision=${decision.status} message=${decision.message}`,
+          );
+
+          if (onProgress && step % this.config.agent.progressReportInterval === 0) {
+            try {
+              await onProgress({
+                step,
+                maxSteps: this.config.agent.maxSteps,
+                currentApp: snapshot.currentApp,
+                actionType: autoAction.type,
+                message: decisionLine,
+                thought: autoThought,
+                screenshotPath,
+              });
+            } catch {
+              // Keep task execution unaffected when progress callback fails.
+            }
+          }
+
+          if (!decision.approved) {
+            const message = `Human authorization ${decision.status}: ${decision.message}`;
+            this.workspace.finalizeSession(session, false, message);
+            this.workspace.appendDailyMemory(profileKey, task, false, message);
+            return {
+              ok: false,
+              message,
+              sessionPath: session.path,
+            };
+          }
+
+          await sleep(Math.min(this.config.agent.loopDelayMs, 1200));
+          continue;
         }
 
         const output = await model.nextStep({

@@ -48,6 +48,13 @@ export interface CronConfig {
   jobsFile: string;
 }
 
+export interface DashboardConfig {
+  enabled: boolean;
+  host: string;
+  port: number;
+  autoOpenBrowser: boolean;
+}
+
 export interface HumanAuthTunnelNgrokConfig {
   enabled: boolean;
   executable: string;
@@ -134,6 +141,7 @@ export interface OpenPocketConfig {
   scriptExecutor: ScriptExecutorConfig;
   heartbeat: HeartbeatConfig;
   cron: CronConfig;
+  dashboard: DashboardConfig;
   humanAuth: HumanAuthConfig;
   models: Record<string, ModelProfile>;
   configPath: string;

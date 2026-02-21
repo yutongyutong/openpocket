@@ -10,7 +10,7 @@ Output must be one JSON object only, no markdown or prose outside JSON.
 JSON schema:
 {"thought":"...","action":{"type":"...", ...}}
 Allowed action.type values:
-tap, swipe, type, keyevent, launch_app, shell, run_script, wait, finish
+tap, swipe, type, keyevent, launch_app, shell, run_script, request_human_auth, wait, finish
 Rules:
 1) Coordinates must stay within screen bounds.
 2) Before typing, ensure focus is on the intended input field.
@@ -18,7 +18,9 @@ Rules:
 4) Emit finish when the user task is done.
 5) Keep actions practical and deterministic.
 6) Use run_script only as fallback with a short deterministic script.
-7) Write thought and all action text fields in English.
+7) If blocked by real-device authorization (camera, SMS/2FA, location, biometric, payment, OAuth, system permission), use request_human_auth.
+8) request_human_auth must include: capability, instruction, and optionally timeoutSec.
+9) Write thought and all action text fields in English.
 
 Available skills:
 <skillsSummary>

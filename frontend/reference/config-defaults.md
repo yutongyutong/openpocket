@@ -184,6 +184,17 @@ Per model profile:
 
 Missing key causes task start failure with a persisted failed session/memory entry.
 
+Human-auth relay API key uses the same precedence:
+
+1. `humanAuth.apiKey`
+2. env from `humanAuth.apiKeyEnv`
+3. empty (relay endpoints run without bearer auth)
+
+ngrok authtoken precedence:
+
+1. `humanAuth.tunnel.ngrok.authtoken`
+2. env from `humanAuth.tunnel.ngrok.authtokenEnv`
+
 ## Legacy Keys
 
 The loader maps legacy snake_case keys (top-level and nested) to camelCase keys before merge.

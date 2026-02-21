@@ -8,6 +8,7 @@ This page explains how OpenPocket constructs prompts and routes user messages.
 
 - strict JSON-only output requirement
 - allowed `action.type` list
+- explicit `request_human_auth` policy for real-device authorization checkpoints
 - safety and execution rules
 - English-only output text rule (`thought` and action text fields)
 - loaded skill summary text
@@ -46,6 +47,12 @@ If model output is invalid JSON or has unknown action type, runtime normalizes t
 
 When routed to task mode, message is passed to `AgentRuntime.runTask`.
 When routed to chat mode, response is generated conversationally.
+
+For task mode with auth checkpoints:
+
+- agent can emit `request_human_auth`
+- gateway opens one-time web approval link (when relay is configured)
+- Telegram `/auth approve|reject` remains available as manual fallback
 
 ## Memory Window
 

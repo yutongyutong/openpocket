@@ -32,6 +32,7 @@ test("installCliShortcut creates launcher and updates shell rc once", () => {
   assert.match(zshBody1, /OpenPocket CLI/);
   assert.match(bashBody1, /OpenPocket CLI/);
   assert.equal(first.shellRcUpdated.length, 2);
+  assert.equal(first.preferredPathCommandPath, null);
 
   const second = installCliShortcut({
     homeDir: home,
@@ -51,4 +52,5 @@ test("installCliShortcut creates launcher and updates shell rc once", () => {
     "bashrc should not duplicate PATH entry",
   );
   assert.equal(second.shellRcUpdated.length, 0);
+  assert.equal(second.preferredPathCommandPath, null);
 });

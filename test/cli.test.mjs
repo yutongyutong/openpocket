@@ -214,7 +214,7 @@ test("help output uses onboard as primary command and lists legacy aliases", () 
   assert.match(result.stdout, /\binit\b/);
   assert.match(result.stdout, /\bsetup\b/);
   assert.match(result.stdout, /gateway \[start\|telegram\]/);
-  assert.match(result.stdout, /panel start/);
+  assert.match(result.stdout, /dashboard start/);
 });
 
 test("telegram setup requires interactive terminal", () => {
@@ -227,6 +227,27 @@ test("telegram setup requires interactive terminal", () => {
   });
   assert.equal(run.status, 1);
   assert.match(run.stderr, /interactive terminal/i);
+});
+
+test("telegram whoami prints allow policy without requiring token", () => {
+  const home = makeHome("openpocket-ts-telegram-whoami-");
+  const init = runCli(["init"], { OPENPOCKET_HOME: home });
+  assert.equal(init.status, 0, init.stderr || init.stdout);
+
+  const run = runCli(["telegram", "whoami"], {
+    OPENPOCKET_HOME: home,
+    TELEGRAM_BOT_TOKEN: "",
+  });
+  assert.equal(run.status, 0, run.stderr || run.stdout);
+  assert.match(run.stdout, /allow policy/i);
+  assert.match(run.stdout, /allow_all/i);
+});
+
+test("telegram command validates unknown subcommand", () => {
+  const run = runCli(["telegram", "noop"]);
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /Unknown telegram subcommand/);
+  assert.match(run.stderr, /setup\|whoami/);
 });
 
 test("gateway start command is accepted (reaches token validation)", () => {
@@ -253,4 +274,53 @@ test("gateway defaults to start when subcommand is omitted", () => {
   });
   assert.equal(run.status, 1);
   assert.match(run.stderr, /Telegram bot token is empty/);
+});
+
+test("dashboard command validates subcommand", () => {
+  const run = runCli(["dashboard", "noop"]);
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /Unknown dashboard subcommand/);
+});
+
+test("test permission-app task prints recommended telegram flow", () => {
+  const run = runCli(["test", "permission-app", "task"]);
+  assert.equal(run.status, 0, run.stderr || run.stdout);
+  assert.match(run.stdout, /request_human_auth/i);
+  assert.match(run.stdout, /OpenPocket PermissionLab/i);
+  assert.match(run.stdout, /--send/);
+});
+
+test("test command validates unknown target", () => {
+  const run = runCli(["test", "unknown-target"]);
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /Unknown test target/);
+});
+
+test("test permission-app task --send requires telegram token", () => {
+  const home = makeHome("openpocket-ts-test-task-send-token-");
+  const init = runCli(["init"], { OPENPOCKET_HOME: home });
+  assert.equal(init.status, 0, init.stderr || init.stdout);
+
+  const run = runCli(["test", "permission-app", "task", "--send"], {
+    OPENPOCKET_HOME: home,
+    TELEGRAM_BOT_TOKEN: "",
+  });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /Telegram bot token is empty/);
+});
+
+test("test permission-app task --send requires chat id when allowlist is empty", () => {
+  const home = makeHome("openpocket-ts-test-task-send-chat-");
+  const init = runCli(["init"], {
+    OPENPOCKET_HOME: home,
+    TELEGRAM_BOT_TOKEN: "token-from-env",
+  });
+  assert.equal(init.status, 0, init.stderr || init.stdout);
+
+  const run = runCli(["test", "permission-app", "task", "--send"], {
+    OPENPOCKET_HOME: home,
+    TELEGRAM_BOT_TOKEN: "token-from-env",
+  });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /No default chat ID found/);
 });

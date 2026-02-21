@@ -32,6 +32,10 @@ test("loadConfig creates defaults including returnHomeOnTaskEnd", () => {
     assert.equal(cfg.humanAuth.localRelayPort, 8787);
     assert.equal(cfg.humanAuth.tunnel.provider, "none");
     assert.equal(cfg.humanAuth.requestTimeoutSec, 300);
+    assert.equal(cfg.dashboard.enabled, true);
+    assert.equal(cfg.dashboard.host, "127.0.0.1");
+    assert.equal(cfg.dashboard.port, 51888);
+    assert.equal(cfg.dashboard.autoOpenBrowser, false);
     assert.equal(cfg.heartbeat.enabled, true);
     assert.equal(cfg.cron.enabled, true);
     assert.equal(fs.existsSync(path.join(home, "config.json")), true);
@@ -89,6 +93,12 @@ test("loadConfig migrates legacy snake_case return_home_on_task_end", () => {
               },
             },
           },
+          dashboard_config: {
+            enabled: true,
+            host: "0.0.0.0",
+            port: 51999,
+            auto_open_browser: true,
+          },
         },
         null,
         2,
@@ -106,6 +116,10 @@ test("loadConfig migrates legacy snake_case return_home_on_task_end", () => {
     assert.equal(cfg.humanAuth.tunnel.ngrok.enabled, true);
     assert.equal(cfg.humanAuth.tunnel.ngrok.authtokenEnv, "NGROK_AUTHTOKEN");
     assert.equal(cfg.humanAuth.tunnel.ngrok.startupTimeoutSec, 33);
+    assert.equal(cfg.dashboard.enabled, true);
+    assert.equal(cfg.dashboard.host, "0.0.0.0");
+    assert.equal(cfg.dashboard.port, 51999);
+    assert.equal(cfg.dashboard.autoOpenBrowser, true);
 
     saveConfig(cfg);
     const saved = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));

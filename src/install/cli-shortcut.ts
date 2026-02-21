@@ -15,6 +15,7 @@ export interface InstallCliShortcutResult {
   cliPath: string;
   shellRcUpdated: string[];
   binDirAlreadyInPath: boolean;
+  preferredPathCommandPath: string | null;
 }
 
 function shellSingleQuote(input: string): string {
@@ -44,6 +45,91 @@ function defaultCliPath(): string {
   return path.resolve(__dirname, "..", "cli.js");
 }
 
+function buildLauncher(cliPath: string): string {
+  return [
+    "#!/usr/bin/env bash",
+    "# OpenPocket CLI launcher",
+    "set -euo pipefail",
+    `exec node ${shellSingleQuote(cliPath)} "$@"`,
+    "",
+  ].join("\n");
+}
+
+function isWritableDirectory(dirPath: string): boolean {
+  try {
+    const stats = fs.statSync(dirPath);
+    if (!stats.isDirectory()) {
+      return false;
+    }
+    fs.accessSync(dirPath, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function installPreferredPathLauncher(
+  commandName: string,
+  launcher: string,
+  homeBinDir: string,
+): string | null {
+  if (process.env.OPENPOCKET_SKIP_ENV_SETUP === "1" || process.env.OPENPOCKET_SKIP_GLOBAL_PATH_INSTALL === "1") {
+    return null;
+  }
+
+  const preferred = ["/usr/local/bin", "/opt/homebrew/bin"];
+  const pathEntries = (process.env.PATH ?? "")
+    .split(path.delimiter)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const candidates = Array.from(
+    new Set([...preferred, ...pathEntries].map((entry) => path.resolve(entry))),
+  );
+
+  for (const dir of candidates) {
+    if (path.resolve(dir) === path.resolve(homeBinDir)) {
+      continue;
+    }
+    if (!isWritableDirectory(dir)) {
+      continue;
+    }
+
+    const commandPath = path.join(dir, commandName);
+    if (fs.existsSync(commandPath)) {
+      try {
+        const existing = fs.readFileSync(commandPath, "utf-8");
+        if (!existing.includes("# OpenPocket CLI launcher")) {
+          continue;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    try {
+      fs.writeFileSync(commandPath, launcher, { encoding: "utf-8", mode: 0o755 });
+      fs.chmodSync(commandPath, 0o755);
+      return commandPath;
+    } catch {
+      // Best effort only; continue to next candidate directory.
+    }
+  }
+
+  return null;
+}
+
+function defaultShellRcPaths(homeDir: string): string[] {
+  const candidates = [
+    path.join(homeDir, ".zshrc"),
+    path.join(homeDir, ".zprofile"),
+    path.join(homeDir, ".bash_profile"),
+    path.join(homeDir, ".bashrc"),
+    path.join(homeDir, ".profile"),
+  ];
+  return Array.from(new Set(candidates));
+}
+
 export function installCliShortcut(
   options: InstallCliShortcutOptions = {},
 ): InstallCliShortcutResult {
@@ -54,18 +140,15 @@ export function installCliShortcut(
   const commandPath = path.join(binDir, commandName);
   fs.mkdirSync(binDir, { recursive: true });
 
-  const launcher = [
-    "#!/usr/bin/env bash",
-    "set -euo pipefail",
-    `exec node ${shellSingleQuote(cliPath)} "$@"`,
-    "",
-  ].join("\n");
+  const launcher = buildLauncher(cliPath);
   fs.writeFileSync(commandPath, launcher, { encoding: "utf-8", mode: 0o755 });
   fs.chmodSync(commandPath, 0o755);
+  const preferredPathCommandPath = options.homeDir
+    ? null
+    : installPreferredPathLauncher(commandName, launcher, binDir);
 
   const exportLine = 'export PATH="$HOME/.local/bin:$PATH"';
-  const shellRcPaths =
-    options.shellRcPaths ?? [path.join(homeDir, ".zshrc"), path.join(homeDir, ".bashrc")];
+  const shellRcPaths = options.shellRcPaths ?? defaultShellRcPaths(homeDir);
   const shellRcUpdated: string[] = [];
   for (const rcPath of shellRcPaths) {
     try {
@@ -89,5 +172,6 @@ export function installCliShortcut(
     cliPath,
     shellRcUpdated,
     binDirAlreadyInPath,
+    preferredPathCommandPath,
   };
 }

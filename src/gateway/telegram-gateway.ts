@@ -29,6 +29,11 @@ export const TELEGRAM_MENU_COMMANDS: TelegramBot.BotCommand[] = [
   { command: "run", description: "Force task mode with text" },
 ];
 
+export interface TelegramGatewayOptions {
+  onLogLine?: (line: string) => void;
+  typingIntervalMs?: number;
+}
+
 export class TelegramGateway {
   private readonly config: OpenPocketConfig;
   private readonly emulator: EmulatorManager;
@@ -40,15 +45,20 @@ export class TelegramGateway {
   private readonly localHumanAuthStack: LocalHumanAuthStack;
   private localHumanAuthActive = false;
   private chat: ChatAssistant;
+  private readonly onLogLine: ((line: string) => void) | null;
+  private readonly typingIntervalMs: number;
+  private readonly typingSessions = new Map<number, { refs: number; timer: NodeJS.Timeout }>();
   private running = false;
   private stoppedPromise: Promise<void> | null = null;
   private stopResolver: (() => void) | null = null;
 
-  constructor(config: OpenPocketConfig) {
+  constructor(config: OpenPocketConfig, options?: TelegramGatewayOptions) {
     this.config = config;
     this.emulator = new EmulatorManager(config);
     this.agent = new AgentRuntime(config);
     this.chat = new ChatAssistant(config);
+    this.onLogLine = options?.onLogLine ?? null;
+    this.typingIntervalMs = Math.max(50, Math.round(options?.typingIntervalMs ?? 4000));
 
     const token =
       config.telegram.botToken.trim() ||
@@ -96,8 +106,14 @@ export class TelegramGateway {
   }
 
   private log(message: string): void {
+    const line = `[OpenPocket][gateway] ${new Date().toISOString()} ${message}`;
     // eslint-disable-next-line no-console
-    console.log(`[OpenPocket][gateway] ${new Date().toISOString()} ${message}`);
+    console.log(line);
+    this.onLogLine?.(line);
+  }
+
+  isRunning(): boolean {
+    return this.running;
   }
 
   private compact(text: string, maxChars: number): string {
@@ -166,6 +182,7 @@ export class TelegramGateway {
     this.bot.removeListener("polling_error", this.handlePollingError);
     this.heartbeat.stop();
     this.cron.stop();
+    this.clearTypingSessions();
     if (this.localHumanAuthActive) {
       await this.localHumanAuthStack.stop();
       this.localHumanAuthActive = false;
@@ -197,15 +214,84 @@ export class TelegramGateway {
   };
 
   private readonly handleMessage = async (message: Message): Promise<void> => {
+    const chatId = message.chat.id;
     try {
-      this.log(`incoming chat=${message.chat.id} text=${JSON.stringify(message.text ?? "")}`);
-      await this.consumeMessage(message);
+      this.log(`incoming chat=${chatId} text=${JSON.stringify(message.text ?? "")}`);
+      const text = message.text?.trim() ?? "";
+      const shouldType = Boolean(text) && this.allowed(chatId);
+      if (shouldType) {
+        await this.withTypingStatus(chatId, async () => {
+          await this.consumeMessage(message);
+        });
+      } else {
+        await this.consumeMessage(message);
+      }
     } catch (error) {
-      const chatId = message.chat.id;
       this.log(`handler error chat=${chatId} error=${(error as Error).message}`);
       await this.bot.sendMessage(chatId, `OpenPocket error: ${(error as Error).message}`);
     }
   };
+
+  private clearTypingSessions(): void {
+    for (const session of this.typingSessions.values()) {
+      clearInterval(session.timer);
+    }
+    this.typingSessions.clear();
+  }
+
+  private async sendTypingAction(chatId: number): Promise<void> {
+    try {
+      await this.bot.sendChatAction(chatId, "typing");
+    } catch {
+      // Ignore chat action failures to keep task execution stable.
+    }
+  }
+
+  private beginTypingStatus(chatId: number): () => void {
+    const existing = this.typingSessions.get(chatId);
+    if (existing) {
+      existing.refs += 1;
+    } else {
+      const timer = setInterval(() => {
+        void this.sendTypingAction(chatId);
+      }, this.typingIntervalMs);
+      timer.unref?.();
+      this.typingSessions.set(chatId, { refs: 1, timer });
+      void this.sendTypingAction(chatId);
+    }
+
+    let released = false;
+    return () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      const session = this.typingSessions.get(chatId);
+      if (!session) {
+        return;
+      }
+      session.refs -= 1;
+      if (session.refs <= 0) {
+        clearInterval(session.timer);
+        this.typingSessions.delete(chatId);
+      }
+    };
+  }
+
+  private async withTypingStatus<T>(
+    chatId: number | null,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    if (chatId === null) {
+      return operation();
+    }
+    const release = this.beginTypingStatus(chatId);
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
 
   private async configureBotCommandMenu(): Promise<void> {
     try {
@@ -478,107 +564,109 @@ export class TelegramGateway {
       `task accepted source=${source} chat=${chatId ?? "(none)"} task=${JSON.stringify(task)} model=${modelName ?? this.config.defaultModel}`,
     );
 
-    try {
-      const result = await this.agent.runTask(
-        task,
-        modelName ?? undefined,
-        chatId === null
-          ? undefined
-          : async (progress) => {
-              this.log(
-                `progress source=${source} chat=${chatId} step=${progress.step}/${progress.maxSteps} action=${progress.actionType} app=${progress.currentApp}`,
-              );
-              const thought = this.sanitizeForChat(progress.thought, 120);
-              const actionResult = this.sanitizeForChat(progress.message, 180);
-              await this.bot.sendMessage(
-                chatId,
-                [
-                  `Progress ${progress.step}/${progress.maxSteps}`,
-                  `Current screen app: ${progress.currentApp}`,
-                  `Action: ${progress.actionType}`,
-                  `Reasoning: ${thought || "Continue observing and planning the next step."}`,
-                  `Result: ${actionResult || "Action executed."}`,
-                ].join("\n"),
-              );
-            },
-        chatId === null
-          ? undefined
-          : async (request) => {
-              const timeoutSec = Math.max(30, Math.round(request.timeoutSec));
-              return this.humanAuth.requestAndWait(
-                { chatId, task, request: { ...request, timeoutSec } },
-                async (opened) => {
-                  const lines = [
-                    `Human authorization required (${request.capability}).`,
-                    `Request ID: ${opened.requestId}`,
-                    `Current app: ${request.currentApp}`,
-                    `Instruction: ${request.instruction}`,
-                    `Reason: ${request.reason || "no reason provided"}`,
-                    `Expires at: ${opened.expiresAt}`,
-                    "",
-                    "Fallback manual commands:",
-                    opened.manualApproveCommand,
-                    opened.manualRejectCommand,
-                  ];
+    return this.withTypingStatus(source === "chat" ? chatId : null, async () => {
+      try {
+        const result = await this.agent.runTask(
+          task,
+          modelName ?? undefined,
+          chatId === null
+            ? undefined
+            : async (progress) => {
+                this.log(
+                  `progress source=${source} chat=${chatId} step=${progress.step}/${progress.maxSteps} action=${progress.actionType} app=${progress.currentApp}`,
+                );
+                const thought = this.sanitizeForChat(progress.thought, 120);
+                const actionResult = this.sanitizeForChat(progress.message, 180);
+                await this.bot.sendMessage(
+                  chatId,
+                  [
+                    `Progress ${progress.step}/${progress.maxSteps}`,
+                    `Current screen app: ${progress.currentApp}`,
+                    `Action: ${progress.actionType}`,
+                    `Reasoning: ${thought || "Continue observing and planning the next step."}`,
+                    `Result: ${actionResult || "Action executed."}`,
+                  ].join("\n"),
+                );
+              },
+          chatId === null
+            ? undefined
+            : async (request) => {
+                const timeoutSec = Math.max(30, Math.round(request.timeoutSec));
+                return this.humanAuth.requestAndWait(
+                  { chatId, task, request: { ...request, timeoutSec } },
+                  async (opened) => {
+                    const lines = [
+                      `Human authorization required (${request.capability}).`,
+                      `Request ID: ${opened.requestId}`,
+                      `Current app: ${request.currentApp}`,
+                      `Instruction: ${request.instruction}`,
+                      `Reason: ${request.reason || "no reason provided"}`,
+                      `Expires at: ${opened.expiresAt}`,
+                      "",
+                      "Fallback manual commands:",
+                      opened.manualApproveCommand,
+                      opened.manualRejectCommand,
+                    ];
 
-                  if (opened.openUrl) {
-                    await this.bot.sendMessage(chatId, lines.join("\n"), {
-                      reply_markup: {
-                        inline_keyboard: [
-                          [
-                            {
-                              text: "Open Human Auth",
-                              url: opened.openUrl,
-                            },
+                    if (opened.openUrl) {
+                      await this.bot.sendMessage(chatId, lines.join("\n"), {
+                        reply_markup: {
+                          inline_keyboard: [
+                            [
+                              {
+                                text: "Open Human Auth",
+                                url: opened.openUrl,
+                              },
+                            ],
                           ],
-                        ],
-                      },
-                    });
-                    return;
-                  }
+                        },
+                      });
+                      return;
+                    }
 
-                  await this.bot.sendMessage(
-                    chatId,
-                    `${lines.join("\n")}\n\nWeb link is unavailable. Use manual approve/reject commands.`,
-                  );
-                },
-              );
-            },
-      );
+                    await this.bot.sendMessage(
+                      chatId,
+                      `${lines.join("\n")}\n\nWeb link is unavailable. Use manual approve/reject commands.`,
+                    );
+                  },
+                );
+              },
+        );
 
-      this.log(`task done source=${source} chat=${chatId ?? "(none)"} ok=${result.ok} session=${result.sessionPath}`);
+        this.log(`task done source=${source} chat=${chatId ?? "(none)"} ok=${result.ok} session=${result.sessionPath}`);
 
-      if (chatId !== null) {
-        if (result.ok) {
-          await this.bot.sendMessage(
-            chatId,
-            `Task completed.\nResult: ${this.sanitizeForChat(result.message, 800) || "Completed."}`,
-          );
-        } else {
-          await this.bot.sendMessage(
-            chatId,
-            `Task not completed.\nReason: ${this.sanitizeForChat(result.message, 800) || "Unknown error."}`,
-          );
+        if (chatId !== null) {
+          if (result.ok) {
+            await this.bot.sendMessage(
+              chatId,
+              `Task completed.\nResult: ${this.sanitizeForChat(result.message, 800) || "Completed."}`,
+            );
+          } else {
+            await this.bot.sendMessage(
+              chatId,
+              `Task not completed.\nReason: ${this.sanitizeForChat(result.message, 800) || "Unknown error."}`,
+            );
+          }
         }
-      }
 
-      return {
-        accepted: true,
-        ok: result.ok,
-        message: result.message,
-      };
-    } catch (error) {
-      const message = `Execution interrupted: ${(error as Error).message || "Unknown error."}`;
-      this.log(`task crash source=${source} chat=${chatId ?? "(none)"} error=${(error as Error).message}`);
-      if (chatId !== null) {
-        await this.bot.sendMessage(chatId, this.sanitizeForChat(message, 600));
+        return {
+          accepted: true,
+          ok: result.ok,
+          message: result.message,
+        };
+      } catch (error) {
+        const message = `Execution interrupted: ${(error as Error).message || "Unknown error."}`;
+        this.log(`task crash source=${source} chat=${chatId ?? "(none)"} error=${(error as Error).message}`);
+        if (chatId !== null) {
+          await this.bot.sendMessage(chatId, this.sanitizeForChat(message, 600));
+        }
+        return {
+          accepted: true,
+          ok: false,
+          message,
+        };
       }
-      return {
-        accepted: true,
-        ok: false,
-        message,
-      };
-    }
+    });
   }
 
   private async handleAuthCommand(chatId: number, text: string): Promise<void> {

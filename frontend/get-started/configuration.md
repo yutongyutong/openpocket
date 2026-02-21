@@ -32,6 +32,12 @@ For each model profile:
 - Else use env var from `models.<name>.apiKeyEnv`.
 - Else treat key as missing and fail task early.
 
+For human-auth relay:
+
+- use `humanAuth.apiKey` if non-empty
+- else use env from `humanAuth.apiKeyEnv` (default `OPENPOCKET_HUMAN_AUTH_KEY`)
+- if both are empty, relay still works in no-auth mode (recommended only for trusted local setups)
+
 ## Legacy Keys
 
 The loader accepts old keys and maps them automatically, including:

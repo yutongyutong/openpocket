@@ -51,6 +51,7 @@ Current foundations:
 - observable task lifecycle
 - step-by-step persistence and logs
 - explicit command surfaces (`agent`, `gateway`, `emulator`, `script`)
+- remote auth unblock flow via one-time web approval link and Telegram `/auth` fallback
 
 Near-term roadmap:
 

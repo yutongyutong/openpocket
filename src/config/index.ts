@@ -77,6 +77,12 @@ function defaultConfigObject() {
       tickSec: 10,
       jobsFile: path.join(defaultWorkspaceDir(), "cron", "jobs.json"),
     },
+    dashboard: {
+      enabled: true,
+      host: "127.0.0.1",
+      port: 51888,
+      autoOpenBrowser: false,
+    },
     humanAuth: {
       enabled: false,
       useLocalRelay: true,
@@ -138,6 +144,42 @@ function defaultConfigObject() {
         reasoningEffort: "medium" as const,
         temperature: null,
       },
+      "blockrun/gpt-4o": {
+        baseUrl: "https://api.blockrun.ai/v1",
+        model: "openai/gpt-4o",
+        apiKey: "",
+        apiKeyEnv: "BLOCKRUN_API_KEY",
+        maxTokens: 4096,
+        reasoningEffort: "medium" as const,
+        temperature: null,
+      },
+      "blockrun/claude-sonnet-4": {
+        baseUrl: "https://api.blockrun.ai/v1",
+        model: "anthropic/claude-sonnet-4",
+        apiKey: "",
+        apiKeyEnv: "BLOCKRUN_API_KEY",
+        maxTokens: 4096,
+        reasoningEffort: "medium" as const,
+        temperature: null,
+      },
+      "blockrun/gemini-2.0-flash": {
+        baseUrl: "https://api.blockrun.ai/v1",
+        model: "google/gemini-2.0-flash-exp",
+        apiKey: "",
+        apiKeyEnv: "BLOCKRUN_API_KEY",
+        maxTokens: 4096,
+        reasoningEffort: null,
+        temperature: null,
+      },
+      "blockrun/deepseek-chat": {
+        baseUrl: "https://api.blockrun.ai/v1",
+        model: "deepseek/deepseek-chat",
+        apiKey: "",
+        apiKeyEnv: "BLOCKRUN_API_KEY",
+        maxTokens: 4096,
+        reasoningEffort: null,
+        temperature: null,
+      },
       "autoglm-phone": {
         baseUrl: "https://api.z.ai/api/paas/v4",
         model: "autoglm-phone-multilingual",
@@ -182,6 +224,7 @@ function normalizeLegacyKeys(input: Record<string, unknown>): Record<string, unk
     script_executor: "scriptExecutor",
     heartbeat_config: "heartbeat",
     cron_config: "cron",
+    dashboard_config: "dashboard",
     human_auth: "humanAuth",
   };
 
@@ -295,6 +338,19 @@ function normalizeLegacyKeys(input: Record<string, unknown>): Record<string, unk
   }
   if (Object.keys(cron).length > 0) {
     raw.cron = cron;
+  }
+
+  const dashboard = isObject(raw.dashboard) ? { ...raw.dashboard } : {};
+  const dashboardMap: Record<string, string> = {
+    auto_open_browser: "autoOpenBrowser",
+  };
+  for (const [oldKey, newKey] of Object.entries(dashboardMap)) {
+    if (oldKey in dashboard && !(newKey in dashboard)) {
+      dashboard[newKey] = dashboard[oldKey];
+    }
+  }
+  if (Object.keys(dashboard).length > 0) {
+    raw.dashboard = dashboard;
   }
 
   const humanAuth = isObject(raw.humanAuth) ? { ...raw.humanAuth } : {};
@@ -421,6 +477,7 @@ function normalizeConfig(raw: Record<string, unknown>, configPath: string): Open
   const scriptExecutor = (merged.scriptExecutor ?? {}) as Record<string, unknown>;
   const heartbeat = (merged.heartbeat ?? {}) as Record<string, unknown>;
   const cron = (merged.cron ?? {}) as Record<string, unknown>;
+  const dashboard = (merged.dashboard ?? {}) as Record<string, unknown>;
   const humanAuth = (merged.humanAuth ?? {}) as Record<string, unknown>;
   const humanAuthTunnel = isObject(humanAuth.tunnel) ? humanAuth.tunnel : {};
   const humanAuthNgrok = isObject(humanAuthTunnel.ngrok) ? humanAuthTunnel.ngrok : {};
@@ -478,6 +535,16 @@ function normalizeConfig(raw: Record<string, unknown>, configPath: string): Open
       enabled: Boolean(cron.enabled ?? true),
       tickSec: Math.max(2, Number(cron.tickSec ?? 10)),
       jobsFile: resolvePath(String(cron.jobsFile ?? path.join(resolvedWorkspaceDir, "cron", "jobs.json"))),
+    },
+    dashboard: {
+      enabled: Boolean(dashboard.enabled ?? true),
+      host: String(dashboard.host ?? "127.0.0.1").trim() || "127.0.0.1",
+      port: (() => {
+        const raw = Number(dashboard.port ?? 51888);
+        const value = Number.isFinite(raw) ? raw : 51888;
+        return Math.max(1, Math.min(65535, Math.round(value)));
+      })(),
+      autoOpenBrowser: Boolean(dashboard.autoOpenBrowser ?? false),
     },
     humanAuth: {
       enabled: Boolean(humanAuth.enabled ?? false),
@@ -575,6 +642,7 @@ export function saveConfig(config: OpenPocketConfig): void {
     scriptExecutor: config.scriptExecutor,
     heartbeat: config.heartbeat,
     cron: config.cron,
+    dashboard: config.dashboard,
     humanAuth: config.humanAuth,
     models: config.models,
   };

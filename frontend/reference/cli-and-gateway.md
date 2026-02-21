@@ -7,6 +7,8 @@ openpocket [--config <path>] install-cli
 openpocket [--config <path>] onboard
 openpocket [--config <path>] config-show
 openpocket [--config <path>] emulator status|start|stop|hide|show|list-avds|screenshot [--out <path>]
+openpocket [--config <path>] emulator tap --x <int> --y <int> [--device <id>]
+openpocket [--config <path>] emulator type --text <text> [--device <id>]
 openpocket [--config <path>] agent [--model <name>] <task>
 openpocket [--config <path>] skills list
 openpocket [--config <path>] script run [--file <path> | --text <script>] [--timeout <sec>]
@@ -82,6 +84,12 @@ Interactive onboarding wizard flow:
 - returns message and session path
 - exit code `0` on success, `1` on failure
 
+## `emulator tap` / `emulator type`
+
+- `emulator tap` sends one direct tap action to target device
+- `emulator type` types text to the focused input target
+- `--device <id>` overrides default device resolution for one command
+
 ## `script run`
 
 - executes script via `ScriptExecutor`
@@ -94,6 +102,21 @@ Interactive onboarding wizard flow:
 - optional interactive allowlist update for `telegram.allowedChatIds`
 - requires an interactive terminal (TTY)
 - `gateway start` auto-configures Telegram slash-command menu (`setMyCommands` + menu button)
+
+## `gateway start`
+
+Startup behavior includes a preflight sequence:
+
+1. load and validate config
+2. validate Telegram token source (`config.telegram.botToken` or env)
+3. ensure emulator is booted (auto-start headless when needed)
+4. start panel on macOS (`panel start`)
+5. start gateway runtime services (Telegram polling, heartbeat, cron)
+
+When human auth is enabled in config, gateway also auto-starts:
+
+- local relay server (`useLocalRelay=true`)
+- optional ngrok tunnel (`humanAuth.tunnel.provider=ngrok` and `ngrok.enabled=true`)
 
 ## Telegram
 

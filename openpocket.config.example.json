@@ -63,6 +63,12 @@
     "tickSec": 10,
     "jobsFile": "~/.openpocket/workspace/cron/jobs.json"
   },
+  "dashboard": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 51888,
+    "autoOpenBrowser": false
+  },
   "humanAuth": {
     "enabled": false,
     "useLocalRelay": true,

@@ -13,6 +13,10 @@ OpenPocket runtime uses `OPENPOCKET_HOME` (default `~/.openpocket`).
     cron-state.json
     control-panel.json
     onboarding.json
+    human-auth-relay/
+      requests.json
+    human-auth-artifacts/
+      auth-*.png|jpg|json|bin
     screenshots/
       *.png
   workspace/
@@ -56,6 +60,7 @@ src/
   config/      # default config, load/save/normalize
   device/      # emulator and adb runtime
   gateway/     # telegram gateway, heartbeat, cron, and run-loop
+  human-auth/  # relay bridge, web relay server, local stack, ngrok tunnel
   memory/      # session, memory, screenshot storage
   skills/      # skill loader and auto artifact builder
   tools/       # script executor

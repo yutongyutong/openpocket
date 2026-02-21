@@ -35,6 +35,10 @@ OpenPocket supports two complementary control paths on the same runtime:
 
 This makes human-agent handoff practical for real app workflows.
 
+For authorization checkpoints, gateway also supports a third interaction surface:
+
+- **Remote auth handoff**: one-time web link approval (plus Telegram fallback commands) when `request_human_auth` is emitted.
+
 ## Components
 
 - `AgentRuntime`: orchestrates task loop, step execution, and session/memory persistence.
@@ -86,4 +90,4 @@ This keeps runtime compatibility across providers with partial endpoint support.
 
 Planned next step:
 
-- richer remote phone controls beyond auth approvals (pause/resume/approve/retry)
+- richer remote phone controls beyond auth approvals (pause/resume/retry/session-level controls)
